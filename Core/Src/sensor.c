@@ -3,8 +3,10 @@
  * @brief MPU6050 sensor implementation.
  */
 #include "stdint.h"
-#include "i2c.h"
 #include "sensor.h"
+
+#include "main.h"
+
 const float LSB_GYRO_SENS = 65.5F; // ± 500 °/s
 
 float g_GyroOffset = 0.0F;

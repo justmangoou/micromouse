@@ -2,8 +2,8 @@
 #include "stdint.h"
 #include "stdbool.h"
 #include "stm32f1xx_hal.h"
-#include "tim.h"
 
+#include "main.h"
 #include "controller.h"
 #include "sensor.h"
 
@@ -15,7 +15,6 @@ float g_Yaw = 0.0F;
 VL53L0XData shared;
 
 /* INTERNAL FUNCTION DECLARATIONS ------------------------------------*/
-static void run_motor(bool motor, int16_t speed);
 static void turn_off_motors(void);
 
 static void handle_moving(float dt);
@@ -59,7 +58,7 @@ void Controller_Reset() {
     g_LMotorSpd = g_RSensor = 0;
 }
 
-void Controller_Turn(const RelativeDirection *dir) {
+void Controller_Turn(RelativeDirection dir) {
     Controller_Reset();
     g_State = STATE_TURNING;
 
@@ -94,28 +93,27 @@ bool Controller_IsWall(const RelativeDirection dir) {
     }
 }
 
-/* INTERNAL FUNCTIONS ------------------------------------------------*/
-static void run_motor(const bool motor, const int16_t speed) {
+void Controller_SetSpeed(const bool motor, const int16_t speed) {
     const uint16_t abs_speed = abs(speed);
 
     if (motor == MOTOR_L) {
         if (speed > 0) {
-            HAL_GPIO_WritePin(MOTOR_L_M_PIN_TYPE, MOTOR_L_M1_PIN_NUM, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(MOTOR_L_M_PIN_TYPE, MOTOR_L_M2_PIN_NUM, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(MOTOR_L_M1_GPIO_Port, MOTOR_L_M1_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(MOTOR_L_M2_GPIO_Port, MOTOR_L_M2_Pin, GPIO_PIN_SET);
         } else {
-            HAL_GPIO_WritePin(MOTOR_L_M_PIN_TYPE, MOTOR_L_M1_PIN_NUM, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(MOTOR_L_M_PIN_TYPE, MOTOR_L_M2_PIN_NUM, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(MOTOR_L_M1_GPIO_Port, MOTOR_L_M1_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(MOTOR_L_M2_GPIO_Port, MOTOR_L_M2_Pin, GPIO_PIN_RESET);
         }
 
         g_LMotorSpd = speed;
         __HAL_TIM_SET_COMPARE(&htim3, MOTOR_L_PWM_CHANNEL, abs_speed);
     } else {
         if (speed > 0) {
-            HAL_GPIO_WritePin(MOTOR_R_M_PIN_TYPE, MOTOR_R_M1_PIN_NUM, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(MOTOR_R_M_PIN_TYPE, MOTOR_R_M2_PIN_NUM, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(MOTOR_R_M1_GPIO_Port, MOTOR_R_M1_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(MOTOR_R_M2_GPIO_Port, MOTOR_R_M2_Pin, GPIO_PIN_SET);
         } else {
-            HAL_GPIO_WritePin(MOTOR_R_M_PIN_TYPE, MOTOR_R_M1_PIN_NUM, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(MOTOR_R_M_PIN_TYPE, MOTOR_R_M2_PIN_NUM, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(MOTOR_R_M1_GPIO_Port, MOTOR_R_M1_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(MOTOR_R_M2_GPIO_Port, MOTOR_R_M2_Pin, GPIO_PIN_RESET);
         }
 
         g_RMotorSpd = speed;
@@ -123,11 +121,17 @@ static void run_motor(const bool motor, const int16_t speed) {
     }
 }
 
+
+void Controller_Test(void) {
+    Controller_SetSpeed(MOTOR_L, 500);
+}
+
+/* INTERNAL FUNCTIONS ------------------------------------------------*/
 static void turn_off_motors(void) {
-    HAL_GPIO_WritePin(MOTOR_L_M_PIN_TYPE, MOTOR_L_M1_PIN_NUM, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(MOTOR_L_M_PIN_TYPE, MOTOR_L_M2_PIN_NUM, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(MOTOR_R_M_PIN_TYPE, MOTOR_R_M1_PIN_NUM, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(MOTOR_R_M_PIN_TYPE, MOTOR_R_M2_PIN_NUM, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MOTOR_L_M1_GPIO_Port, MOTOR_L_M1_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MOTOR_L_M2_GPIO_Port, MOTOR_L_M2_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MOTOR_R_M1_GPIO_Port, MOTOR_R_M1_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MOTOR_R_M2_GPIO_Port, MOTOR_R_M2_Pin, GPIO_PIN_RESET);
     HAL_Delay(1000);
 }
 
@@ -135,11 +139,11 @@ static void handle_moving(const float dt) {
     process_pid((float)g_LSensor - (float)g_RSensor, dt);
 
     if (PID.Error > 0.5F) {
-        run_motor(MOTOR_L, (int16_t) PID.Output);
-        run_motor(MOTOR_R, (int16_t) -PID.Output);
+        Controller_SetSpeed(MOTOR_L, (int16_t) PID.Output);
+        Controller_SetSpeed(MOTOR_R, (int16_t) -PID.Output);
     } else if (PID.Error < -0.5F) {
-        run_motor(MOTOR_L, (int16_t) -PID.Output);
-        run_motor(MOTOR_R, (int16_t) PID.Output);
+        Controller_SetSpeed(MOTOR_L, (int16_t) -PID.Output);
+        Controller_SetSpeed(MOTOR_R, (int16_t) PID.Output);
     } else {
         Controller_Reset();
         g_State = STATE_IDLE;
@@ -151,11 +155,11 @@ static void handle_turn(const float dt) {
     process_pid(g_Yaw, dt);
 
     if (PID.Error > 0.5F) {
-        run_motor(MOTOR_L, (int16_t) PID.Output);
-        run_motor(MOTOR_R, (int16_t) PID.Output);
+        Controller_SetSpeed(MOTOR_L, (int16_t) PID.Output);
+        Controller_SetSpeed(MOTOR_R, (int16_t) PID.Output);
     } else if (PID.Error < -0.5F) {
-        run_motor(MOTOR_L, (int16_t) -PID.Output);
-        run_motor(MOTOR_R, (int16_t) -PID.Output);
+        Controller_SetSpeed(MOTOR_L, (int16_t) -PID.Output);
+        Controller_SetSpeed(MOTOR_R, (int16_t) -PID.Output);
     } else {
         Controller_Reset();
         g_State = STATE_MOVING;

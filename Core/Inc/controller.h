@@ -5,22 +5,19 @@
 #ifndef CONTROLLER_H
 #define CONTROLLER_H
 
+#include "stdbool.h"
+
 #define MOTOR_L 0
 #define MOTOR_R 1
 
-#define MOTOR_L_PWM_CHANNEL TIM_CHANNEL_2
-#define MOTOR_L_M_PIN_TYPE GPIOB
-#define MOTOR_L_M1_PIN_NUM GPIO_PIN_0
-#define MOTOR_L_M2_PIN_NUM GPIO_PIN_1
-#define MOTOR_R_PWM_CHANNEL TIM_CHANNEL_1
-#define MOTOR_R_M_PIN_TYPE GPIOA
-#define MOTOR_R_M1_PIN_NUM GPIO_PIN_5
-#define MOTOR_R_M2_PIN_NUM GPIO_PIN_4
+#define TURN_KP 0.1F
+#define TURN_KD 0.01F
+#define TURN_KI 0.5F
+#define CENTERING_KP 0.1F
+#define CENTERING_KD 0.01F
+#define CENTERING_KI 0.5F
 
-const float TURN_KP = 0.1F, TURN_KD = 0.01F, TURN_KI = 0.5F;
-const float CENTERING_KP = 0.1F, CENTERING_KD = 0.01F, CENTERING_KI = 0.5F, CENTERING_SET_POINT = 0;
-
-struct {
+extern struct {
     double Kp, Ki, Kd;
 
     double SetPoint;
@@ -28,7 +25,7 @@ struct {
     double Error, AccumError, PrevError;
 } PID;
 
-enum {
+extern enum {
     STATE_IDLE = 0,
     STATE_MOVING = 1,
     STATE_TURNING = 2,
@@ -56,5 +53,9 @@ void Controller_Update(float dt);
 void Controller_Turn(RelativeDirection dir);
 
 bool Controller_IsWall(RelativeDirection dir);
+
+void Controller_SetSpeed(bool motor, int16_t speed);
+
+void Controller_Test(void);
 
 #endif //CONTROLLER_H

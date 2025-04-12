@@ -41,7 +41,7 @@ void MotorEncoder_ReadVelocity(MotorEncoderData *data);
 //---------------------------------------------------------------------
 // MPU6050 Sensor
 //---------------------------------------------------------------------
-const uint8_t MPU6050_DEF_ADDR = 0x68 << 1;
+#define MPU6050_DEF_ADDR 0x68 << 1
 
 enum MPU6050_REG_ADDR {
     MPU6050_REG_WHO_AM_I = 0x75,
@@ -75,21 +75,7 @@ float MPU6050_GetZAngle(void);
 //-----------------------------------------------------
 // VL53L0X Sensor
 //-----------------------------------------------------
-#define VL53L0X_L_XSHUT_GPIO GPIOB
-#define VL53L0X_L_XSHUT_PIN GPIO_PIN_10
-#define VL53L0X_R_XSHUT_GPIO GPIOB
-#define VL53L0X_R_XSHUT_PIN GPIO_PIN_11
-#define VL53L0X_F_XSHUT_GPIO GPIOB
-#define VL53L0X_F_XSHUT_PIN GPIO_PIN_12
-
-const uint8_t VL53L0X_DEF_ADDR = 0x29 << 1;
-const uint8_t VL53L0X_L_ADDR   = 0x30 << 1;
-const uint8_t VL53L0X_R_ADDR   = 0x31 << 1;
-const uint8_t VL53L0X_F_ADDR   = 0x32 << 1;
-
-const uint8_t VL53L0X_L_OFFSET = -40;
-const uint8_t VL53L0X_R_OFFSET = -40;
-const uint8_t VL53L0X_F_OFFSET = -40;
+#define VL53L0X_DEF_ADDR 0x29 << 1
 
 enum VL53L0X_REG_ADDR {
     VL53L0X_REG_SYSRANGE_START = 0x00,
@@ -237,13 +223,6 @@ bool VL53L0X_PerformRefCalibration(void);
  * @return True if initialization was successful, false otherwise.
  */
 bool VL53L0X_Init(bool io_2v8);
-
-/**
- * @brief Initializes all VL53L0X sensors.
- * @param io_2v8 see VL53L0X_Init
- * @return True if initialization was successful, false otherwise.
- */
-bool VL53L0X_InitAll(bool io_2v8);
 
 /**
  * @brief Sets the return signal rate limit to the given value in units of MCPS (mega counts per second).

@@ -3,10 +3,10 @@
  * @brief VL53L0X sensor implementation.
  * @author https://github.com/Squieler/VL53L0X---STM32-HAL
  */
-#include "i2c.h"
 #include "stdbool.h"
 #include "stm32f1xx_hal.h"
 #include "sensor.h"
+#include "main.h"
 
 uint8_t g_i2cAddr = VL53L0X_DEF_ADDR;
 uint16_t g_ioTimeout = 0;  // no timeout
@@ -30,8 +30,6 @@ static void get_sequence_step_timeouts(SequenceStepEnables const *enables, Seque
 static void load_tuning_settings(void);
 static bool perform_single_ref_calibration(uint8_t vhv_init_byte);
 static bool perform_ref_calibration(void);
-
-static void internal_init(bool io_2v8, uint8_t addr);
 
 static void start_timeout(void);
 static bool check_timeout_expired(void);
@@ -143,27 +141,6 @@ bool VL53L0X_Init(const bool io_2v8) {
     // VL53L0X_StaticInit() end
 
     if (!perform_ref_calibration()) return false;
-
-    return true;
-}
-
-bool VL53L0X_InitAll(const bool io_2v8) {
-    HAL_GPIO_WritePin(VL53L0X_L_XSHUT_GPIO, VL53L0X_L_XSHUT_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(VL53L0X_R_XSHUT_GPIO, VL53L0X_R_XSHUT_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(VL53L0X_F_XSHUT_GPIO, VL53L0X_F_XSHUT_PIN, GPIO_PIN_RESET);
-    HAL_Delay(10);
-
-    HAL_GPIO_WritePin(VL53L0X_L_XSHUT_GPIO, VL53L0X_L_XSHUT_PIN, GPIO_PIN_SET);
-    HAL_Delay(10);
-    internal_init(io_2v8, VL53L0X_L_ADDR);
-
-    HAL_GPIO_WritePin(VL53L0X_R_XSHUT_GPIO, VL53L0X_R_XSHUT_PIN, GPIO_PIN_SET);
-    HAL_Delay(10);
-    internal_init(io_2v8, VL53L0X_L_ADDR);
-
-    HAL_GPIO_WritePin(VL53L0X_F_XSHUT_GPIO, VL53L0X_F_XSHUT_PIN, GPIO_PIN_SET);
-    HAL_Delay(10);
-    internal_init(io_2v8, VL53L0X_L_ADDR);
 
     return true;
 }
@@ -816,15 +793,6 @@ static bool perform_ref_calibration(void) {
     // "restore the previous Sequence Config"
     write_8bit(VL53L0X_REG_SYSTEM_SEQUENCE_CONFIG, 0xE8);
     return true;
-}
-
-static void internal_init(const bool io_2v8, const uint8_t addr) {
-    VL53L0X_SetAddr(addr);
-    VL53L0X_Init(io_2v8);
-    VL53L0X_SetSignalRateLimit(20);
-    VL53L0X_SetVcselPulsePeriod(VcselPeriodPreRange, 10);
-    VL53L0X_SetVcselPulsePeriod(VcselPeriodFinalRange, 14);
-    VL53L0X_SetMeasurementTimingBudget(300 * 1000UL);
 }
 
 /**

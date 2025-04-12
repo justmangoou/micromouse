@@ -4,11 +4,12 @@
 #include "stdint.h"
 #include "stdbool.h"
 
-#define STACK_SIZE_INDEX 0
-#define STACK_POINTER_INDEX 1
-
 #define SIZE 16
 #define HALF_SIZE (SIZE / 2)
+
+#define STACK_SIZE 80
+#define STACK_SIZE_INDEX 0
+#define STACK_POINTER_INDEX 1
 
 typedef struct {
   uint8_t x, y, val;
@@ -25,12 +26,13 @@ typedef struct {
 } Maze;
 
 typedef struct {
-  uint_least8_t Properties;
+  uint_least8_t Properties[2];
   MazeNode *Array[];
 } MazeStack;
 
 MazeStack *MazeStack_New(void);
 void MazeStack_Delete(MazeStack **stack);
+bool MazeStack_IsEmpty(MazeStack *stack);
 void MazeStack_Push(MazeStack *stack, MazeNode *node);
 MazeNode *MazeStack_Pop(MazeStack *stack);
 
