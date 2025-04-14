@@ -1,10 +1,10 @@
 /**
- * @file solver_stack.c
+ * @file maze_stack.c
  * @brief Stack implementation for maze solving. ONLY USE FOR FLOODFILL
  */
 #include "stdlib.h"
 #include "stdbool.h"
-#include "solver.h"
+#include "maze.h"
 
 MazeStack *MazeStack_New(void) {
     MazeStack *stack = malloc(sizeof(MazeStack));

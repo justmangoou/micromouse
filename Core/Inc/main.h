@@ -36,6 +36,35 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
+typedef enum SolveMode
+{
+    FLOOD_FILL = 0,
+    WALL_FOLLOWING = 1
+} SolveMode;
+
+typedef enum State
+{
+    IDLE,
+    MOVING,
+    TURNING,
+} State;
+
+typedef enum Direction
+{
+    NORTH = 0,
+    EAST = 1,
+    SOUTH = 2,
+    WEST = 3,
+} Direction;
+
+typedef enum
+{
+    LEFT = 0,
+    RIGHT = 1,
+    FORWARD = 2,
+    BACKWARD = 3,
+} RelativeDirection;
+
 extern I2C_HandleTypeDef hi2c1;
 
 extern TIM_HandleTypeDef htim2;
@@ -43,6 +72,13 @@ extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim4;
 
 extern UART_HandleTypeDef huart1;
+
+extern State state;
+
+extern Direction robot_dir;
+extern uint_least8_t lDist, rDist, fDist;
+extern float yaw;
+
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
@@ -55,11 +91,11 @@ extern UART_HandleTypeDef huart1;
 
 /* USER CODE END EM */
 
-void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
+void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim);
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
-
+RelativeDirection Convert_Direction(Direction dir);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */
@@ -111,8 +147,18 @@ void Error_Handler(void);
 #define VL53L0X_R_OFFSET -40
 #define VL53L0X_F_OFFSET -40
 
+#define MOTOR_L true
+#define MOTOR_R false
+
+// TIM3
 #define MOTOR_L_PWM_CHANNEL TIM_CHANNEL_2
 #define MOTOR_R_PWM_CHANNEL TIM_CHANNEL_1
+// TIM2
+#define MOTOR_L_C1          TIM_CHANNEL_1
+#define MOTOR_L_C2          TIM_CHANNEL_2
+// TIM4
+#define MOTOR_R_C1          TIM_CHANNEL_1
+#define MOTOR_R_C2          TIM_CHANNEL_2
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
