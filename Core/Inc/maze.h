@@ -4,6 +4,8 @@
 #include "stdint.h"
 #include "stdbool.h"
 
+#include "main.h"
+
 #define SIZE 16
 #define HALF_SIZE (SIZE / 2)
 

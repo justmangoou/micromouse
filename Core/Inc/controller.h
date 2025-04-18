@@ -17,14 +17,6 @@
 #define CENTERING_KD 0.01F
 #define CENTERING_KI 0.5F
 
-extern struct {
-    double Kp, Ki, Kd;
-
-    double SetPoint;
-    double Output;
-    double Error, AccumError, PrevError;
-} PID;
-
 void Controller_Init(void);
 
 void Controller_Reset(void);
@@ -33,8 +25,6 @@ void Controller_Update(float dt);
 
 void Controller_Turn(RelativeDirection dir);
 
-void Controller_SetSpeed(bool motor, int16_t speed);
-
-void Controller_Test(void);
+void Controller_SetSpeed(bool motor, int8_t speed_power);
 
 #endif //CONTROLLER_H

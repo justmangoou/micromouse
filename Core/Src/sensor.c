@@ -18,6 +18,14 @@ static void read(uint32_t reg, uint8_t *data, uint8_t len);
 //---------------------------------------------------------------------
 // Motor Encoder
 //---------------------------------------------------------------------
+void Encoder_Reset(void) {
+    __HAL_TIM_SET_COUNTER(&htim2, 0);
+    __HAL_TIM_SET_COUNTER(&htim4, 0);
+}
+
+uint16_t Encoder_GetCount(const bool right) {
+    return right ? __HAL_TIM_GET_COUNTER(&htim4) : __HAL_TIM_GET_COUNTER(&htim2);
+}
 
 //---------------------------------------------------------------------
 // MPU6050 Sensor
@@ -74,9 +82,9 @@ float MPU6050_GetZAngle(void) {
 
 /* INTERNAL FUNCTIONS ------------------------------------------------*/
 static void write_8bit(const uint32_t reg, uint8_t *data) {
-    HAL_I2C_Mem_Write(&hi2c1, MPU6050_DEF_ADDR, reg, I2C_MEMADD_SIZE_8BIT, data, 1, I2C_TIMEOUT);
+    HAL_I2C_Mem_Write(&hi2c2, MPU6050_DEF_ADDR, reg, I2C_MEMADD_SIZE_8BIT, data, 1, I2C_TIMEOUT);
 }
 
 static void read(const uint32_t reg, uint8_t *data, const uint8_t len) {
-    HAL_I2C_Mem_Read(&hi2c1, MPU6050_DEF_ADDR, reg, I2C_MEMADD_SIZE_8BIT, data, len, I2C_TIMEOUT);
+    HAL_I2C_Mem_Read(&hi2c2, MPU6050_DEF_ADDR, reg, I2C_MEMADD_SIZE_8BIT, data, len, I2C_TIMEOUT);
 }

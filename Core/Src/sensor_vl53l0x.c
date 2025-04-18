@@ -45,7 +45,6 @@ static uint32_t calc_macro_period(uint8_t vcsel_period_pclks);
 
 /* PUBLIC FUNCTIONS --------------------------------------------------*/
 void VL53L0X_SetAddr(const uint8_t new_addr) {
-    write_8bit(VL53L0X_REG_I2C_SLAVE_DEVICE_ADDRESS, (new_addr >> 1) & 0x7F);
     g_i2cAddr = new_addr;
 }
 
@@ -53,7 +52,10 @@ uint8_t VL53L0X_GetAddr(void) {
     return g_i2cAddr;
 }
 
-bool VL53L0X_Init(const bool io_2v8) {
+bool VL53L0X_Init(const bool io_2v8, const uint8_t addr) {
+    g_i2cAddr = VL53L0X_DEF_ADDR;
+    write_8bit(VL53L0X_REG_I2C_SLAVE_DEVICE_ADDRESS, addr >> 1);
+    g_i2cAddr = addr;
     // VL53L0X_DataInit() begin
 
     // sensor uses 1V8 mode for I/O by default; switch to 2V8 mode if necessary
@@ -434,7 +436,7 @@ uint8_t VL53L0X_GetVcselPulsePeriod(const VcselPeriodType type) {
 }
 
 // Based on VL53L0X_StartMeasurement()
-void Vl53L0X_StartContinuous(uint32_t period_ms) {
+void VL53L0X_StartContinuous(uint32_t period_ms) {
     write_8bit(0x80, 0x01);
     write_8bit(0xFF, 0x01);
     write_8bit(0x00, 0x00);
@@ -473,6 +475,10 @@ void VL53L0X_StopContinuous(void) {
     write_8bit(0x91, 0x00);
     write_8bit(0x00, 0x01);
     write_8bit(0xFF, 0x00);
+}
+
+void VL53L0X_ClearInterrupt(void) {
+    write_8bit(VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR, 0x01);
 }
 
 uint16_t VL53L0X_ReadRangeContinuousMillimeters(VL53L0XData *extraStats) {
@@ -542,7 +548,7 @@ uint16_t VL53L0X_GetTimeout(void){
 
 /* INTERNAL FUNCTIONS ------------------------------------------------*/
 static void write(const uint32_t reg, uint8_t *data, const uint8_t len) {
-    HAL_I2C_Mem_Write(&hi2c1, g_i2cAddr | I2C_WRITE, reg, I2C_MEMADD_SIZE_8BIT, data, len, I2C_TIMEOUT);
+    HAL_I2C_Mem_Write(&hi2c2, g_i2cAddr | I2C_WRITE, reg, I2C_MEMADD_SIZE_8BIT, data, len, I2C_TIMEOUT);
 }
 
 static void write_8bit(const uint32_t reg, uint8_t data) {
@@ -558,7 +564,7 @@ static void write_32bit(const uint32_t reg, uint32_t data) {
 }
 
 static void read(const uint32_t reg, uint8_t *data, const uint8_t len) {
-    HAL_I2C_Mem_Read(&hi2c1, g_i2cAddr | I2C_READ, reg, I2C_MEMADD_SIZE_8BIT, data, len, I2C_TIMEOUT);
+    HAL_I2C_Mem_Read(&hi2c2, g_i2cAddr | I2C_READ, reg, I2C_MEMADD_SIZE_8BIT, data, len, I2C_TIMEOUT);
 }
 
 static uint8_t read_8bit(const uint32_t reg) {

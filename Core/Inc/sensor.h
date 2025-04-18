@@ -15,28 +15,9 @@ static const uint16_t I2C_TIMEOUT = 100;
 //---------------------------------------------------------------------
 // Motor Encoder
 //---------------------------------------------------------------------
-typedef struct {
-    int32_t position;
-    int32_t velocity;
-} MotorEncoderData;
-
-/**
- * @brief Initializes the motor encoder.
- * @return True if initialization was successful, false otherwise.
- */
-bool MotorEncoder_Init(void);
-
-/**
- * @brief Reads the current position from the motor encoder.
- * @param data Pointer to MotorEncoderData structure to store the data.
- */
-void MotorEncoder_ReadPosition(MotorEncoderData *data);
-
-/**
- * @brief Reads the current velocity from the motor encoder.
- * @param data Pointer to MotorEncoderData structure to store the data.
- */
-void MotorEncoder_ReadVelocity(MotorEncoderData *data);
+void Encoder_UpdateSpeed(void);
+void Encoder_Reset(void);
+uint16_t Encoder_GetCount(bool right);
 
 //---------------------------------------------------------------------
 // MPU6050 Sensor
@@ -200,7 +181,7 @@ typedef struct {
 } SequenceStepTimeouts;
 
 /**
- * @brief Sets a new I2C address for the VL53L0X sensor.
+ * @brief Sets what address the sensor will respond to.
  * @param new_addr The new I2C address to set.
  */
 void VL53L0X_SetAddr(uint8_t new_addr);
@@ -220,9 +201,10 @@ bool VL53L0X_PerformRefCalibration(void);
 /**
  * @brief Initializes the VL53L0X sensor.
  * @param io_2v8 If true, sets the sensor to use 2.8V I/O mode.
+ * @param addr The I2C address to set for the sensor.
  * @return True if initialization was successful, false otherwise.
  */
-bool VL53L0X_Init(bool io_2v8);
+bool VL53L0X_Init(bool io_2v8, uint8_t addr);
 
 /**
  * @brief Sets the return signal rate limit to the given value in units of MCPS (mega counts per second).
@@ -300,6 +282,11 @@ void VL53L0X_StartContinuous(uint32_t period_ms);
  * @brief Stops continuous ranging measurements.
  */
 void VL53L0X_StopContinuous(void);
+
+/**
+ * @brief Clears the interrupt flag for the VL53L0X sensor.
+ */
+void VL53L0X_ClearInterrupt(void);
 
 /**
  * @brief Reads a range measurement in millimeters during continuous mode.

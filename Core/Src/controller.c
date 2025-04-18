@@ -5,11 +5,16 @@
 
 #include "main.h"
 #include "controller.h"
-#include "sensor.h"
 
-int_least8_t g_LSpdPwr = 0, g_RSpdPwr = 0;
+int8_t l_spd_pwr = 0, r_spd_pwr = 0;
 
-VL53L0XData shared;
+struct {
+    double Kp, Ki, Kd;
+
+    double SetPoint;
+    double Output;
+    double Error, AccumError, PrevError;
+} PID;
 
 /* INTERNAL FUNCTION DECLARATIONS ------------------------------------*/
 static void process_pid(float input, float dt);
@@ -17,12 +22,14 @@ static void process_pid(float input, float dt);
 /* PUBLIC FUNCTIONS --------------------------------------------------*/
 void Controller_Init(void)
 {
+    HAL_TIM_PWM_Start(&htim3, MOTOR_L_PWM_CHANNEL);
+    HAL_TIM_PWM_Start(&htim3, MOTOR_R_PWM_CHANNEL);
 }
 
 void Controller_Reset(void)
 {
-    PID.SetPoint = PID.Error = PID.AccumError = PID.PrevError = 0.0f;
-    g_LSpdPwr = g_RSpdPwr = 0;
+    PID.SetPoint = PID.Error = PID.AccumError = PID.PrevError = 0.0F;
+    l_spd_pwr = r_spd_pwr = 0;
 
     HAL_GPIO_WritePin(MOTOR_L_M1_GPIO_Port, MOTOR_L_M1_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MOTOR_L_M2_GPIO_Port, MOTOR_L_M2_Pin, GPIO_PIN_RESET);
@@ -36,7 +43,7 @@ void Controller_Update(const float dt)
     switch (state)
     {
     case MOVING:
-        process_pid((float)lDist - (float)rDist, dt);
+        process_pid((float)l_dist - (float)r_dist, dt);
         break;
     case TURNING:
         process_pid(yaw, dt);
@@ -83,7 +90,7 @@ void Controller_Turn(RelativeDirection dir)
     }
 }
 
-void Controller_SetSpeed(const bool motor, const int_least8_t speed_power)
+void Controller_SetSpeed(const bool motor, const int8_t speed_power)
 {
     const uint16_t speed = abs(speed_power) * MOTOR_MAX_SPEED / 100;
 
@@ -100,7 +107,7 @@ void Controller_SetSpeed(const bool motor, const int_least8_t speed_power)
             HAL_GPIO_WritePin(MOTOR_L_M2_GPIO_Port, MOTOR_L_M2_Pin, GPIO_PIN_RESET);
         }
 
-        g_LSpdPwr = speed_power;
+        l_spd_pwr = speed_power;
         __HAL_TIM_SET_COMPARE(&htim3, MOTOR_L_PWM_CHANNEL, speed);
     }
     else
@@ -116,7 +123,7 @@ void Controller_SetSpeed(const bool motor, const int_least8_t speed_power)
             HAL_GPIO_WritePin(MOTOR_R_M2_GPIO_Port, MOTOR_R_M2_Pin, GPIO_PIN_RESET);
         }
 
-        g_RSpdPwr = speed_power;
+        r_spd_pwr = speed_power;
         __HAL_TIM_SET_COMPARE(&htim3, MOTOR_R_PWM_CHANNEL, speed);
     }
 }
