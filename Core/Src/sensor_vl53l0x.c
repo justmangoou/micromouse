@@ -35,7 +35,6 @@ static void start_timeout(void);
 static bool check_timeout_expired(void);
 static uint16_t decode_timeout(uint16_t reg_val);
 static uint16_t encode_timeout(uint16_t timeout_mclks);
-static bool timeout_occurred(void);
 static uint32_t timeout_mclks_to_microseconds(uint16_t timeout_period_mclks, uint8_t vcsel_period_pclks);
 static uint32_t timeout_microseconds_to_mclks(uint32_t timeout_period_us, uint8_t vcsel_period_pclks);
 
@@ -450,7 +449,7 @@ void VL53L0X_StartContinuous(uint32_t period_ms) {
 
         // VL53L0X_SetInterMeasurementPeriodMilliSeconds() begin
 
-        const uint16_t osc_calibrate_val = read_8bit(VL53L0X_REG_OSC_CALIBRATE_VAL);
+        const uint16_t osc_calibrate_val = read_16bit(VL53L0X_REG_OSC_CALIBRATE_VAL);
 
         if (osc_calibrate_val != 0)
             period_ms *= osc_calibrate_val;
@@ -544,6 +543,14 @@ void VL53L0X_SetTimeout(const uint16_t timeout){
 
 uint16_t VL53L0X_GetTimeout(void){
     return g_ioTimeout;
+}
+
+// Did a timeout occur in one of the read functions since the last call to
+// timeoutOccurred()?
+bool VL53L0X_TimeoutOccurred(void) {
+    const bool tmp = g_isTimeout;
+    g_isTimeout = false;
+    return tmp;
 }
 
 /* INTERNAL FUNCTIONS ------------------------------------------------*/
@@ -849,14 +856,6 @@ uint16_t encode_timeout(const uint16_t timeout_mclks) {
     }
 
     return 0;
-}
-
-// Did a timeout occur in one of the read functions since the last call to
-// timeoutOccurred()?
-bool timeout_occurred(void) {
-    const bool tmp = g_isTimeout;
-    g_isTimeout = false;
-    return tmp;
 }
 
 /**

@@ -75,9 +75,8 @@ extern UART_HandleTypeDef huart2;
 
 extern State state;
 
-extern Direction robot_dir;
-extern volatile uint8_t dist[3];
-extern float yaw;
+extern Direction curr_dir, prev_dir;
+extern volatile uint16_t dist[3];
 
 /* USER CODE END ET */
 
@@ -103,6 +102,8 @@ Direction Convert_RelativeDirection(RelativeDirection dir);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define LED_Pin GPIO_PIN_13
+#define LED_GPIO_Port GPIOC
 #define VL53L0X_R_GPIO1_Pin GPIO_PIN_14
 #define VL53L0X_R_GPIO1_GPIO_Port GPIOC
 #define VL53L0X_R_GPIO1_EXTI_IRQn EXTI15_10_IRQn
@@ -149,11 +150,12 @@ Direction Convert_RelativeDirection(RelativeDirection dir);
 #define VL53L0X_R_ADDR   0x31 << 1
 #define VL53L0X_F_ADDR   0x32 << 1
 
-#define VL53L0X_L_OFFSET -40
-#define VL53L0X_R_OFFSET -40
-#define VL53L0X_F_OFFSET -40
+#define VL53L0X_L_OFFSET -10
+#define VL53L0X_R_OFFSET 0
+#define VL53L0X_F_OFFSET -45
 
 #define WALL_THRESHOLD 80
+#define F_WALL_THRESHOLD 50
 
 #define WHEEL_RADIUS 2.25F // Centimeters
 #define ROBOT_BASE_RADIUS 3.25F // Centimeters
@@ -161,6 +163,7 @@ Direction Convert_RelativeDirection(RelativeDirection dir);
 
 #define MOTOR_L true
 #define MOTOR_R false
+#define BASE_SPD_PWR 25
 
 // TIM3
 #define MOTOR_L_PWM_CHANNEL TIM_CHANNEL_2

@@ -56,17 +56,18 @@ bool MPU6050_Init(void) {
         data = 0x01;
         write_8bit(MPU6050_REG_GYRO_CONFIG, &data);
 
+        // Calibrate
+        int32_t sum = 0;
+        for (int i = 0; i < 500; i++) {
+            sum += MPU6050_ReadGyroZ();
+            HAL_Delay(2);
+        }
+
+        g_GyroOffset = (float)sum / 500.00 / LSB_GYRO_SENS;
+
         return true;
     }
 
-    // Calibrate
-    int32_t sum = 0;
-    for (int i = 0; i < 100; i++) {
-        sum += MPU6050_ReadGyroZ();
-        HAL_Delay(5);
-    }
-
-    g_GyroOffset = (float)sum / 200.0F / LSB_GYRO_SENS;
     return false;
 }
 
@@ -77,7 +78,7 @@ int16_t MPU6050_ReadGyroZ(void) {
 }
 
 float MPU6050_GetZAngle(void) {
-    return (float)MPU6050_ReadGyroZ() / LSB_GYRO_SENS - g_GyroOffset;
+    return ((float)MPU6050_ReadGyroZ() / LSB_GYRO_SENS - g_GyroOffset) / 100;
 }
 
 /* INTERNAL FUNCTIONS ------------------------------------------------*/

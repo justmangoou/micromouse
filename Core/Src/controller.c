@@ -1,12 +1,18 @@
+#include "stdio.h"
 #include "stdlib.h"
 #include "stdint.h"
 #include "stdbool.h"
-#include "stm32f1xx_hal.h"
+#include "string.h"
+#include "tgmath.h"
 
+#include "stm32f1xx_hal.h"
 #include "main.h"
 #include "controller.h"
 
-int8_t l_spd_pwr = 0, r_spd_pwr = 0;
+#include "sensor.h"
+
+float l_spd_pwr = 0, r_spd_pwr = 0;
+float yaw_on_turn = 0.0F;
 
 struct {
     double Kp, Ki, Kd;
@@ -38,61 +44,109 @@ void Controller_Reset(void)
     HAL_Delay(1000);
 }
 
-void Controller_Update(const float dt)
-{
-    switch (state)
-    {
-    case MOVING:
-        process_pid((float)l_dist - (float)r_dist, dt);
-        break;
-    case TURNING:
-        process_pid(yaw, dt);
-        break;
-    default:
-        break;
+void Controller_MoveForward(void) {
+    if (f_dist < 60) {
+        Controller_Reset();
+        return;
     }
 
-    if (PID.Error > 0.5F)
+    Controller_SetSpeed(MOTOR_L, BASE_SPD_PWR);
+    Controller_SetSpeed(MOTOR_R, BASE_SPD_PWR);
+}
+
+void Controller_UpdateTurning(const float dt)
+{
+    const float angle = MPU6050_GetZAngle();
+    yaw_on_turn += angle * dt;
+    process_pid(yaw_on_turn, dt);
+
+    const float speed = BASE_SPD_PWR + PID.Output;
+
+    char msg[50];
+    sprintf(msg, "PID: %f %f %f\n", PID.Error, PID.Output, speed);
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+
+    if (PID.Error < -2.0F)
     {
-        Controller_SetSpeed(MOTOR_L, (int16_t)PID.Output);
-        Controller_SetSpeed(MOTOR_R, (int16_t)-PID.Output);
+        Controller_SetSpeed(MOTOR_L, speed);
+        Controller_SetSpeed(MOTOR_R, -speed);
     }
-    else if (PID.Error < -0.5F)
+    else if (PID.Error > 2.0F)
     {
-        Controller_SetSpeed(MOTOR_L, (int16_t)-PID.Output);
-        Controller_SetSpeed(MOTOR_R, (int16_t)PID.Output);
+        Controller_SetSpeed(MOTOR_L, -speed);
+        Controller_SetSpeed(MOTOR_R, speed);
     }
     else
     {
         Controller_Reset();
-        state = state == TURNING ? MOVING : IDLE;
+        state = MOVING;
+    }
+}
+
+void Controller_UpdateCentering(const float dt) {
+    if (f_dist < F_WALL_THRESHOLD) {
+        Controller_Reset();
+        return;
+    }
+
+    float error = 0;
+
+    const bool has_left = l_dist < WALL_THRESHOLD;
+    const bool has_right = r_dist < WALL_THRESHOLD;
+
+    if (has_left && has_right) {
+        // Centering: stay between walls
+        error = (float)l_dist - (float)r_dist;
+    } else if (has_left) {
+        // Left wall-following: target fixed distance
+        error = (float)l_dist - WALL_THRESHOLD;
+    } else if (has_right) {
+        // Right wall-following: target fixed distance
+        error = WALL_THRESHOLD - (float)r_dist;
+    } else {
+        // No wall to follow
+        error = 0;
+    }
+
+    process_pid(error, dt);
+
+    if (fabs(PID.Error) > 2.0F)
+    {
+        Controller_SetSpeed(MOTOR_L, BASE_SPD_PWR + PID.Output);
+        Controller_SetSpeed(MOTOR_R, BASE_SPD_PWR - PID.Output);
     }
 }
 
 void Controller_Turn(RelativeDirection dir)
 {
+    HAL_Delay(1100);
     Controller_Reset();
+    yaw_on_turn = 0;
     state = TURNING;
+
+    PID.Kp = TURN_KP;
+    PID.Ki = TURN_KI;
+    PID.Kd = TURN_KD;
 
     switch (dir)
     {
     case LEFT:
-        PID.SetPoint = -90;
-        break;
-    case RIGHT:
         PID.SetPoint = 90;
         break;
+    case RIGHT:
+        PID.SetPoint = -90;
+        break;
     case BACKWARD:
-        PID.SetPoint = -180;
+        PID.SetPoint = 180;
         break;
     default:
         break;
     }
 }
 
-void Controller_SetSpeed(const bool motor, const int8_t speed_power)
+void Controller_SetSpeed(const bool motor, const float speed_power)
 {
-    const uint16_t speed = abs(speed_power) * MOTOR_MAX_SPEED / 100;
+    const float speed = fabs(speed_power) * MOTOR_MAX_SPEED / 107;
 
     if (motor == MOTOR_L)
     {
