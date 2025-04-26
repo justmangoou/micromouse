@@ -13,9 +13,9 @@
 #define TURN_KP 0.1F
 #define TURN_KI 0.0F
 #define TURN_KD 0.8F
-#define CENTERING_KP 0.1F
-#define CENTERING_KI 0.01F
-#define CENTERING_KD 0.5F
+#define CENTERING_KP 2.6F
+#define CENTERING_KI 0.05F
+#define CENTERING_KD 0.8F
 void Controller_Init(void);
 
 void Controller_Reset(void);

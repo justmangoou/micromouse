@@ -65,10 +65,14 @@ State state = IDLE;
 
 volatile uint8_t flags = 0;
 VL53L0XData l_dist_data, r_dist_data, f_dist_data;
-Direction curr_dir, prev_dir = NORTH;
+volatile Direction curr_dir, prev_dir = NORTH;
 volatile uint16_t dist[3];
 
 uint32_t g_lastTime = 0;
+volatile uint32_t update_prev_time = 0;
+volatile uint32_t delay_turn_time = 0;
+
+volatile RelativeDirection next_turn_dir = RIGHT;
 
 // FLOODFILL
 // Maze maze;
@@ -143,8 +147,8 @@ int main(void) {
     MX_I2C2_Init();
     MX_USART2_UART_Init();
     /* USER CODE BEGIN 2 */
-    VL53L0X_InitAll();
     MPU6050_Init();
+    VL53L0X_InitAll();
     I2C_Scanner();
     Controller_Init();
 
@@ -237,43 +241,61 @@ int main(void) {
         //     continue;
         // }
 
-        sprintf(msg, "L R F Wall: %d %d %d\n", IsWall(LEFT), IsWall(RIGHT), IsWall(FORWARD));
-        HAL_UART_Transmit(&huart2, (uint8_t *) msg, strlen(msg), HAL_MAX_DELAY);
+        if (state == MOVING) {
+            if (f_dist <= F_WALL_THRESHOLD - 10) Controller_Reset();
+            if (HAL_GetTick() >= update_prev_time) prev_dir = curr_dir;
+        }
+
+        if (state == DELAY_FOR_TURNING) {
+            if (f_dist <= F_WALL_THRESHOLD - 10) Controller_Reset();
+            if (HAL_GetTick() > delay_turn_time) {
+                Controller_Turn(next_turn_dir);
+            }
+            continue;
+        }
 
         if (mode == WALL_FOLLOWING) {
             // Priority: left > forward > right > (avoid back)
             if (!IsWall(LEFT)) {
                 Direction next_dir = Convert_RelativeDirection(LEFT);
-                if (Convert_Direction(next_dir) != BACKWARD) {
-                    Controller_Turn(LEFT);
+                if (next_dir != Direction_Opposite(prev_dir)) {
+                    state = DELAY_FOR_TURNING;
+                    next_turn_dir = LEFT;
+                    delay_turn_time = HAL_GetTick() + 550;
                     prev_dir = curr_dir;
                     curr_dir = next_dir;
-                    // sprintf(msg, "Prev Dir: %d, New Dir: %d\n", prev_dir, curr_dir);
-                    // HAL_UART_Transmit(&huart2, (uint8_t *) msg, strlen(msg), HAL_MAX_DELAY);
+                    continue;
                 }
-            } else if (!IsWall(FORWARD)) {
-                if (IsWall(RIGHT) && IsWall(LEFT)) {
-                    Controller_UpdateCentering(dts);
-                } else {
-                    Controller_MoveForward();
-                }
-            } else if (!IsWall(RIGHT)) {
-                    Direction next_dir = Convert_RelativeDirection(RIGHT);
-                    if (Convert_Direction(next_dir) != BACKWARD) {
-                        Controller_Turn(RIGHT);
-                        prev_dir = curr_dir;
-                        curr_dir = next_dir;
-                        // sprintf(msg, "Prev Dir: %d, New Dir: %d\n", prev_dir, curr_dir);
-                        // HAL_UART_Transmit(&huart2, (uint8_t *) msg, strlen(msg), HAL_MAX_DELAY);
-                    }
-                // } else {
-                //     // Nowhere to go — turn around
-                //     Direction next_dir = Convert_RelativeDirection(BACKWARD);
-                //     Controller_Turn(BACKWARD);
-                //     prev_dir = curr_dir;
-                //     curr_dir = next_dir;
-                // }
+
+                // sprintf(msg, "Prev Dir: %d, New Dir: %d\n", prev_dir, curr_dir);
+                // HAL_UART_Transmit(&huart2, (uint8_t *) msg, strlen(msg), HAL_MAX_DELAY);
             }
+
+            if (!IsWall(FORWARD)) {
+                Controller_UpdateCentering(dts);
+                continue;
+            }
+
+            if (!IsWall(RIGHT)) {
+                Direction next_dir = Convert_RelativeDirection(RIGHT);
+                if (next_dir != Direction_Opposite(prev_dir)) {
+                    state = DELAY_FOR_TURNING;
+                    next_turn_dir = RIGHT;
+                    delay_turn_time = HAL_GetTick() + 550;
+                    prev_dir = curr_dir;
+                    curr_dir = next_dir;
+                    continue;
+                }
+
+                // sprintf(msg, "Prev Dir: %d, New Dir: %d\n", prev_dir, curr_dir);
+                // HAL_UART_Transmit(&huart2, (uint8_t *) msg, strlen(msg), HAL_MAX_DELAY);
+            }
+
+            // Nowhere to go — turn around
+            Direction next_dir = Convert_RelativeDirection(BACKWARD);
+            Controller_Turn(BACKWARD);
+            prev_dir = curr_dir;
+            curr_dir = next_dir;
         }
         /* USER CODE END WHILE */
 
@@ -646,11 +668,11 @@ static void VL53L0X_InitAll(void) {
 static bool IsWall(const RelativeDirection dir) {
     switch (dir) {
         case FORWARD:
-            return f_dist < F_WALL_THRESHOLD;
+            return f_dist <= F_WALL_THRESHOLD;
         case LEFT:
-            return l_dist < WALL_THRESHOLD;
+            return l_dist <= WALL_THRESHOLD;
         case RIGHT:
-            return r_dist < WALL_THRESHOLD;
+            return r_dist <= WALL_THRESHOLD;
         default:
             return false;
     }
@@ -739,6 +761,10 @@ Direction Convert_RelativeDirection(const RelativeDirection dir) {
     }
 
     return NORTH;
+}
+
+Direction Direction_Opposite(Direction dir) {
+    return (dir + 2) % 4;
 }
 
 /* TEST FUNCTION ------*/

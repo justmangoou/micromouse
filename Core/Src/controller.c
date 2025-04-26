@@ -41,7 +41,11 @@ void Controller_Reset(void)
     HAL_GPIO_WritePin(MOTOR_L_M2_GPIO_Port, MOTOR_L_M2_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MOTOR_R_M1_GPIO_Port, MOTOR_R_M1_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MOTOR_R_M2_GPIO_Port, MOTOR_R_M2_Pin, GPIO_PIN_RESET);
-    HAL_Delay(1000);
+
+    Controller_SetSpeed(MOTOR_L, 0);
+    Controller_SetSpeed(MOTOR_R, 0);
+
+    HAL_Delay(500);
 }
 
 void Controller_MoveForward(void) {
@@ -66,12 +70,12 @@ void Controller_UpdateTurning(const float dt)
     sprintf(msg, "PID: %f %f %f\n", PID.Error, PID.Output, speed);
     HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
 
-    if (PID.Error < -2.0F)
+    if (PID.Error < -3.0F)
     {
         Controller_SetSpeed(MOTOR_L, speed);
         Controller_SetSpeed(MOTOR_R, -speed);
     }
-    else if (PID.Error > 2.0F)
+    else if (PID.Error > 3.0F)
     {
         Controller_SetSpeed(MOTOR_L, -speed);
         Controller_SetSpeed(MOTOR_R, speed);
@@ -79,12 +83,13 @@ void Controller_UpdateTurning(const float dt)
     else
     {
         Controller_Reset();
+        update_prev_time = HAL_GetTick() + 800;
         state = MOVING;
     }
 }
 
 void Controller_UpdateCentering(const float dt) {
-    if (f_dist < F_WALL_THRESHOLD) {
+    if (f_dist <= F_WALL_THRESHOLD) {
         Controller_Reset();
         return;
     }
@@ -99,10 +104,10 @@ void Controller_UpdateCentering(const float dt) {
         error = (float)l_dist - (float)r_dist;
     } else if (has_left) {
         // Left wall-following: target fixed distance
-        error = (float)l_dist - WALL_THRESHOLD;
+        error = (float)l_dist - (WALL_THRESHOLD - 40);
     } else if (has_right) {
         // Right wall-following: target fixed distance
-        error = WALL_THRESHOLD - (float)r_dist;
+        error = (WALL_THRESHOLD - 40) - (float)r_dist;
     } else {
         // No wall to follow
         error = 0;
@@ -110,16 +115,18 @@ void Controller_UpdateCentering(const float dt) {
 
     process_pid(error, dt);
 
-    if (fabs(PID.Error) > 2.0F)
-    {
-        Controller_SetSpeed(MOTOR_L, BASE_SPD_PWR + PID.Output);
-        Controller_SetSpeed(MOTOR_R, BASE_SPD_PWR - PID.Output);
-    }
+    char msg[50];
+    sprintf(msg, "PID: %f %f %f\n", PID.Error, PID.Output, error);
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+
+    if ((has_left || has_right) && (fabs(PID.Error) < 0.5F)) return;
+
+    Controller_SetSpeed(MOTOR_L, BASE_SPD_PWR + PID.Output * 1.25);
+    Controller_SetSpeed(MOTOR_R, BASE_SPD_PWR + 1.5 - PID.Output * 1.25);
 }
 
 void Controller_Turn(RelativeDirection dir)
 {
-    HAL_Delay(1100);
     Controller_Reset();
     yaw_on_turn = 0;
     state = TURNING;

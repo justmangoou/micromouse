@@ -46,6 +46,7 @@ typedef enum State
 {
     IDLE,
     MOVING,
+    DELAY_FOR_TURNING,
     TURNING,
 } State;
 
@@ -75,8 +76,10 @@ extern UART_HandleTypeDef huart2;
 
 extern State state;
 
-extern Direction curr_dir, prev_dir;
+extern volatile Direction curr_dir, prev_dir;
 extern volatile uint16_t dist[3];
+
+extern volatile uint32_t update_prev_time;
 
 /* USER CODE END ET */
 
@@ -99,6 +102,8 @@ void Error_Handler(void);
 RelativeDirection Convert_Direction(Direction dir);
 
 Direction Convert_RelativeDirection(RelativeDirection dir);
+
+Direction Direction_Opposite(Direction dir);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
@@ -150,12 +155,12 @@ Direction Convert_RelativeDirection(RelativeDirection dir);
 #define VL53L0X_R_ADDR   0x31 << 1
 #define VL53L0X_F_ADDR   0x32 << 1
 
-#define VL53L0X_L_OFFSET -10
-#define VL53L0X_R_OFFSET 0
+#define VL53L0X_L_OFFSET -7
+#define VL53L0X_R_OFFSET 5
 #define VL53L0X_F_OFFSET -45
 
-#define WALL_THRESHOLD 80
-#define F_WALL_THRESHOLD 50
+#define WALL_THRESHOLD 110
+#define F_WALL_THRESHOLD 40
 
 #define WHEEL_RADIUS 2.25F // Centimeters
 #define ROBOT_BASE_RADIUS 3.25F // Centimeters
@@ -163,7 +168,7 @@ Direction Convert_RelativeDirection(RelativeDirection dir);
 
 #define MOTOR_L true
 #define MOTOR_R false
-#define BASE_SPD_PWR 25
+#define BASE_SPD_PWR 40
 
 // TIM3
 #define MOTOR_L_PWM_CHANNEL TIM_CHANNEL_2
