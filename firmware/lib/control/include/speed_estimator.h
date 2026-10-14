@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-namespace nav {
+namespace control {
 
 // Counts moved between two reads of a free-running 16-bit counter. Right as long as fewer than 32768 counts pass
 // between the reads (the wheel makes ~2800 counts/s at full speed, so that is more than 11 s).
@@ -32,4 +32,4 @@ private:
     float speed_ = 0;
 };
 
-}  // namespace nav
+}  // namespace control

@@ -25,7 +25,7 @@ namespace {
 
 class Wheel {
 public:
-    Wheel(const Motor& motor, const nav::SpeedController& controller, TIM_HandleTypeDef* encoder, int encoderSign)
+    Wheel(const Motor& motor, const control::SpeedController& controller, TIM_HandleTypeDef* encoder, int encoderSign)
         : motor_(motor),
           controller_(controller),
           speed_(cfg::CM_PER_COUNT, cfg::SPEED_LOOP_DT_S),
@@ -49,7 +49,7 @@ public:
     // disabled so the speed estimate is warm when the wheel is enabled.
     void tick() {
         uint16_t now = counter();
-        float speed = speed_.update(nav::counterDelta(now, lastLoop_) * encoderSign_);
+        float speed = speed_.update(control::counterDelta(now, lastLoop_) * encoderSign_);
         lastLoop_ = now;
         if (!enabled_) return;
         motor_.setDuty(controller_.update(target_, speed, cfg::SPEED_LOOP_DT_S));
@@ -59,7 +59,7 @@ public:
     // shares no state with tick() and needs no interrupt lock.
     int32_t takeCounts() {
         uint16_t now = counter();
-        int32_t d = nav::counterDelta(now, lastOdometry_) * encoderSign_;
+        int32_t d = control::counterDelta(now, lastOdometry_) * encoderSign_;
         lastOdometry_ = now;
         return d;
     }
@@ -68,8 +68,8 @@ private:
     uint16_t counter() const { return (uint16_t)__HAL_TIM_GET_COUNTER(encoder_); }
 
     Motor motor_;
-    nav::SpeedController controller_;
-    nav::SpeedEstimator speed_;
+    control::SpeedController controller_;
+    control::SpeedEstimator speed_;
     TIM_HandleTypeDef* encoder_;
     int encoderSign_;
 
@@ -79,9 +79,9 @@ private:
     uint16_t lastOdometry_ = 0;  // counter at the last takeCounts()
 };
 
-nav::SpeedController makeController() {
-    return nav::SpeedController(cfg::V_FULL_CM_S, cfg::USE_SPEED_LOOP,
-                                nav::Pid(cfg::SPEED_KP, cfg::SPEED_KI, 0.0f, 20.0f, cfg::SPEED_CORR_LIMIT));
+control::SpeedController makeController() {
+    return control::SpeedController(cfg::V_FULL_CM_S, cfg::USE_SPEED_LOOP,
+                                control::Pid(cfg::SPEED_KP, cfg::SPEED_KI, 0.0f, 20.0f, cfg::SPEED_CORR_LIMIT));
 }
 
 Wheel gLeft(Motor(&htim3, TIM_CHANNEL_1, TIM_CHANNEL_2, cfg::MOTOR_SIGN_L), makeController(), &htim2, cfg::ENC_SIGN_L);

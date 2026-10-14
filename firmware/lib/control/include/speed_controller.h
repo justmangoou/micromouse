@@ -12,7 +12,7 @@
 
 #include "pid.h"
 
-namespace nav {
+namespace control {
 
 class SpeedController {
 public:
@@ -31,4 +31,4 @@ private:
     Pid pid_;
 };
 
-}  // namespace nav
+}  // namespace control

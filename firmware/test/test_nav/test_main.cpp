@@ -120,8 +120,8 @@ void test_odometry_straight_and_turn() {
 }
 
 void test_speed_controller() {
-    nav::Pid pid(0.004f, 0.02f, 0.0f, 20.0f, 0.3f);
-    nav::SpeedController c(62.2f, true, pid);
+    control::Pid pid(0.004f, 0.02f, 0.0f, 20.0f, 0.3f);
+    control::SpeedController c(62.2f, true, pid);
     // on target: the PID adds nothing, only the feed-forward remains
     TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.5f, c.update(31.1f, 31.1f, 0.005f));
     // too slow: more duty than the feed-forward alone
@@ -130,28 +130,28 @@ void test_speed_controller() {
     c.update(0.5f, 0.0f, 0.005f);
     TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.5f, c.update(31.1f, 31.1f, 0.005f));
     // open loop: feed-forward only, whatever the measurement says
-    nav::SpeedController open(62.2f, false, pid);
+    control::SpeedController open(62.2f, false, pid);
     TEST_ASSERT_FLOAT_WITHIN(1e-4f, -0.5f, open.update(-31.1f, 0.0f, 0.005f));
 }
 
 void test_counter_delta_wraps() {
-    TEST_ASSERT_EQUAL_INT32(5, counterDelta(105, 100));
-    TEST_ASSERT_EQUAL_INT32(-5, counterDelta(95, 100));
-    TEST_ASSERT_EQUAL_INT32(10, counterDelta(4, 65530));      // forward through the 16-bit wrap
-    TEST_ASSERT_EQUAL_INT32(-10, counterDelta(65530, 4));     // backward through it
-    TEST_ASSERT_EQUAL_INT32(0, counterDelta(777, 777));
+    TEST_ASSERT_EQUAL_INT32(5, control::counterDelta(105, 100));
+    TEST_ASSERT_EQUAL_INT32(-5, control::counterDelta(95, 100));
+    TEST_ASSERT_EQUAL_INT32(10, control::counterDelta(4, 65530));      // forward through the 16-bit wrap
+    TEST_ASSERT_EQUAL_INT32(-10, control::counterDelta(65530, 4));     // backward through it
+    TEST_ASSERT_EQUAL_INT32(0, control::counterDelta(777, 777));
 }
 
 void test_speed_estimator() {
     const float cmPerCount = 0.024f, dt = 0.005f;
-    SpeedEstimator est(cmPerCount, dt);
+    control::SpeedEstimator est(cmPerCount, dt);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, est.speed());
     // a steady 10 counts per period is 48 cm/s; the first-order filter (alpha 0.4) gets there from zero
     float v = 0;
     for (int i = 0; i < 40; i++) v = est.update(10);
     TEST_ASSERT_FLOAT_WITHIN(0.05f, 10 * cmPerCount / dt, v);
     // the first sample alone only moves it alpha of the way
-    SpeedEstimator fresh(cmPerCount, dt);
+    control::SpeedEstimator fresh(cmPerCount, dt);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.4f * 10 * cmPerCount / dt, fresh.update(10));
     // backwards counts give a negative speed
     for (int i = 0; i < 40; i++) v = est.update(-10);

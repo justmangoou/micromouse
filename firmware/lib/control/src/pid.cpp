@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-namespace nav {
+namespace control {
 
 float Pid::update(float setpoint, float measured, float dt) {
     float err = setpoint - measured;
@@ -19,4 +19,4 @@ float Pid::update(float setpoint, float measured, float dt) {
     return out;
 }
 
-}  // namespace nav
+}  // namespace control

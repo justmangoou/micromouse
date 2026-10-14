@@ -4,7 +4,7 @@
  */
 #include "speed_controller.h"
 
-namespace nav {
+namespace control {
 
 namespace {
 constexpr float TARGET_DEADBAND = 1.0f;  // cm/s: below this the wheel is meant to stand still
@@ -20,4 +20,4 @@ float SpeedController::update(float target, float measured, float dt) {
     return feedForward + pid_.update(target, measured, dt);
 }
 
-}  // namespace nav
+}  // namespace control

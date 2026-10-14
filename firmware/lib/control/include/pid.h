@@ -4,7 +4,7 @@
  */
 #pragma once
 
-namespace nav {
+namespace control {
 
 class Pid {
 public:
@@ -26,4 +26,4 @@ private:
     float integral_ = 0, prevError_ = 0;
 };
 
-}  // namespace nav
+}  // namespace control
