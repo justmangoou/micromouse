@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+._*
+
+# Editors (keep the recommended-extensions list)
+.idea/
+**/.vscode/*
+!**/.vscode/extensions.json
+*.swp
+*~
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# PlatformIO / firmware build output
+.pio/
+*.elf
+*.bin
+*.hex
+*.map
+
+# Regenerable sim output: rendered GIFs, training logs, in-progress checkpoints
+*.gif
+*.log
+sim/checkpoints/*_last.npz

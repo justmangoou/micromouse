@@ -1,0 +1,25 @@
+# Normalise line endings: LF in the repo and in checkouts.
+* text=auto eol=lf
+
+# Binary files: never diff or merge as text.
+*.npz binary
+*.gz binary
+*.pdf binary
+*.png binary
+*.gif binary
+*.jpg binary
+*.JPG binary
+
+# ST's VL53L0X API ships with CRLF in places; keep third-party files byte for byte.
+firmware/lib/vl53l0x_api/** -text
+
+# Language statistics and diffs: third-party and generated code is not ours.
+firmware/lib/vl53l0x_api/** linguist-vendored
+firmware/include/stm32f4xx_hal_conf.h linguist-vendored
+firmware/include/map_data.h linguist-generated
+firmware/test/test_nav/ref_data.h linguist-generated
+docs/** linguist-documentation
+
+# Hide generated files from diffs by default.
+firmware/include/map_data.h -diff
+firmware/test/test_nav/ref_data.h -diff

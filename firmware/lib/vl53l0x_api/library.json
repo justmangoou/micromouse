@@ -1,0 +1,9 @@
+{
+  "name": "vl53l0x_api",
+  "version": "0.0.0",
+  "description": "ST VL53L0X API, portable core only. The I2C platform functions are in lib/vl53l0x_impl.",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "include"
+  }
+}
