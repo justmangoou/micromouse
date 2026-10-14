@@ -63,7 +63,7 @@ coarser than the firmware's real 200 Hz (5 ms) wheel loop — a reasonable appro
 **Finding from porting the PID verbatim:** `Robot.place()` (used on the initial drop and on every
 Điều 5 reposition) resets wheel speed to zero but must also reset the PID's integral and the measured-speed
 filter — without that, a car stuck against a block (repeatedly repositioned) winds the integral up to its
-clamp and stays pinned there. The firmware has the same gap: `main.cpp` never calls `wheelEnable(false)` on a
+clamp and stays pinned there. The firmware has the same gap: `src/course.cpp` never calls `wheelEnable(false)` on a
 mid-run reposition, so `Wheel`'s PID integral is never reset either. Worth fixing there too.
 
 ## Rules implemented (`course/env.py`)

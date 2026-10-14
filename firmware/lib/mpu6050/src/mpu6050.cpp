@@ -1,13 +1,16 @@
 /**
  * @file    mpu6050.cpp
- * @brief   MPU6050 gyro-z driver, implementation.
+ * @brief   MPU6050 gyro-z driver, implementation. See mpu6050.h.
  */
-#include <optional>
 #include "mpu6050.h"
+#include "math_util.h"
+
+#include <optional>
 
 namespace {
 
-// Registers
+// Registers: RM-MPU-6000A-00, sections 4.2–4.4, 4.20, 4.30, 4.34.
+// https://cdn.sparkfun.com/datasheets/Sensors/Accelerometers/RM-MPU-6000A.pdf
 constexpr uint8_t REG_SMPLRT_DIV   = 0x19;
 constexpr uint8_t REG_CONFIG       = 0x1A;
 constexpr uint8_t REG_GYRO_CONFIG  = 0x1B;
@@ -15,13 +18,12 @@ constexpr uint8_t REG_GYRO_ZOUT_H  = 0x47;
 constexpr uint8_t REG_PWR_MGMT_1   = 0x6B;
 constexpr uint8_t REG_WHO_AM_I     = 0x75;
 
-// WHO_AM_I expected return (AD0 low = 0x68)
+// WHO_AM_I stays 0x68 regardless of AD0 (bus address 0x68 or 0x69).
 constexpr uint8_t WHO_AM_I_VAL     = 0x68;
 
 // Scale factors: ±500 dps -> 65.5 LSB/(deg/s) -> rad/s direct factor
 constexpr float SCALE_500DPS       = 65.5f;
-constexpr float DEG_TO_RAD         = 0.0174532925f;
-constexpr float GYRO_Z_TO_RAD_S    = (1.0f / SCALE_500DPS) * DEG_TO_RAD;
+constexpr float GYRO_Z_TO_RAD_S    = math::toRadian(1.0f) / SCALE_500DPS;
 
 } // namespace
 
@@ -30,6 +32,8 @@ bool Mpu6050::write(uint8_t reg, uint8_t val) {
 }
 
 bool Mpu6050::init() {
+    initialized_ = false;
+    gyroBiasZ_ = 0.0f;
     auto id = bus_.readReg(addr7_, REG_WHO_AM_I);
     if (!id || *id != WHO_AM_I_VAL)
         return false;
@@ -51,10 +55,31 @@ bool Mpu6050::init() {
     if (!write(REG_GYRO_CONFIG, 0x08)) return false;
 
     HAL_Delay(10);
+    initialized_ = true;
+    return true;
+}
+
+bool Mpu6050::calibrateGyroZ(uint16_t samples, uint32_t samplePeriodMs) {
+    if (!initialized_ || samples == 0 || samplePeriodMs < 5) return false;
+    float mean = 0.0f;
+    for (uint32_t i = 0; i < samples; i++) {
+        if (i > 0) HAL_Delay(samplePeriodMs);
+        auto sample = readRawGyroZ();
+        if (!sample) return false;
+        mean += (*sample - mean) / static_cast<float>(i + 1);
+    }
+    gyroBiasZ_ = mean;
     return true;
 }
 
 std::optional<float> Mpu6050::readGyroZ() {
+    auto raw = readRawGyroZ();
+    if (!raw) return std::nullopt;
+    return *raw - gyroBiasZ_;
+}
+
+std::optional<float> Mpu6050::readRawGyroZ() {
+    if (!initialized_) return std::nullopt;
     uint8_t buf[2];
     if (!bus_.read(addr7_, REG_GYRO_ZOUT_H, buf, 2)) {
         return std::nullopt;

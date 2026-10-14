@@ -18,7 +18,7 @@ extern TIM_HandleTypeDef htim4;  // right encoder (hardware quadrature)
 extern TIM_HandleTypeDef htim11;  // speed loop interrupt (cfg::SPEED_LOOP_HZ)
 
 // Clock (100 MHz from the 25 MHz crystal), GPIO, UART, I2C, ADC, PWM, encoders. The speed loop timer is started
-// separately, after wheelInit().
+// separately, after motorInit().
 void boardInit();
 void speedLoopStart();
 

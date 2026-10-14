@@ -1,7 +1,7 @@
 /**
  * @file    geometry.h
  * @brief   Arena geometry shared by the planner, the navigator and the host tests: blocks, ray-casting and the track.
- *          Units: cm, rad. Mirrors sim/config.py and sim/course/arena.py. Generic helpers (math::Vec2, math::Pose,
+ *          Units: mm, rad. Mirrors sim/config.py and sim/course/arena.py. Generic helpers (math::Vec2, math::Pose,
  *          math::wrap) are in math_util.h.
  */
 #pragma once
@@ -12,14 +12,14 @@
 
 namespace nav {
 
-constexpr float BLOCK_HALF = 5.0f;  // blocks are 10 x 10 x 10 cm
-constexpr float BLOCK_HALF_DIAG = 7.0711f;
-constexpr float TAPE_HALF = 1.0f;
-constexpr float ARENA_W = 180.0f;
-constexpr float PAD_Y = -20.0f;     // floor below the start / finish line
-constexpr float ARENA_H = 120.0f;
+constexpr float BLOCK_HALF = 50.0f;  // blocks are 100 x 100 x 100 mm
+constexpr float BLOCK_HALF_DIAG = 70.711f;
+constexpr float TAPE_HALF = 10.0f;
+constexpr float ARENA_W = 1800.0f;
+constexpr float PAD_Y = -200.0f;     // floor below the start / finish line
+constexpr float ARENA_H = 1200.0f;
 
-// A 10 cm square block: centre and rotation. cos/sin are cached because every query needs them.
+// A 100 mm square block: centre and rotation. cos/sin are cached because every query needs them.
 struct Block {
     float x = 0, y = 0, ang = 0, c = 1, s = 0;
     Block() {}
@@ -35,9 +35,9 @@ float rayBlock(math::Vec2 o, math::Vec2 d, const Block& b, float maxRange);
 // On the inverted-U track. margin > 0 dilates it (tape), < 0 erodes it.
 bool insideTrack(math::Vec2 p, float margin);
 
-// How many cm of margin this point (assumed on the track) still has before insideTrack would call it off-track --
+// How many mm of margin this point (assumed on the track) still has before insideTrack would call it off-track --
 // i.e. its distance to the tape boundary. Found by bisection on insideTrack rather than deriving the U-shaped
 // polygon's edges by hand (it is a union of 3 rectangles, not one convex shape). Port of arena.edge_margin.
-float edgeMargin(math::Vec2 p, float hi = 30.0f, int iters = 10);
+float edgeMargin(math::Vec2 p, float hi = 300.0f, int iters = 10);
 
 }  // namespace nav

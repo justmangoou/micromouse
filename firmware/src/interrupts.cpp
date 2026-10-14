@@ -14,7 +14,7 @@ void SysTick_Handler(void) { HAL_IncTick(); }
 void TIM1_TRG_COM_TIM11_IRQHandler(void) {
     if (__HAL_TIM_GET_FLAG(&htim11, TIM_FLAG_UPDATE)) {
         __HAL_TIM_CLEAR_FLAG(&htim11, TIM_FLAG_UPDATE);
-        wheelTick();
+        motorTick();
     }
 }
 

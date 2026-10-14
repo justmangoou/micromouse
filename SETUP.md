@@ -72,44 +72,49 @@ ST-Link upload. Hard-float is forced through `fpu_flags.py` because the ststm32 
 
 ```
 firmware/
-  platformio.ini
-  include/    headers: config.h (robot constants), pins.h (pin plan), map_data.h (generated), board, motor, wheel,
-              tof_array, stm32f4xx_hal_conf.h
-  src/        sources only: main.cpp (state machine), board.cpp (clock, GPIO, UART, I2C, PWM, encoders, speed loop timer),
-              wheel (encoders + one Wheel object per side), tof_array (4x VL53L0X), interrupts, syscalls
+  platformio.ini  one environment per navigation mode (micromouse, obstacle_avoidance) plus native host tests
+  include/    config.h (robot constants), pins.h (pin plan), board.h, motor.h, tof_array.h, robot.h,
+              map_data.h (generated), stm32f4xx_hal_conf.h
+  src/        main.cpp     start-up and the sensor loop, shared by both modes
+              course.cpp   block-course mode: start pose, finish line, A* navigator (env:obstacle_avoidance)
+              maze.cpp     maze mode: maze tuning, flood-fill explorer (env:micromouse)
+              board.cpp (clock, GPIO, UART, I2C, ADC, PWM, encoder timers, speed loop timer), motor.cpp (motors and the
+              wheel speed loop), tof_array.cpp (4x VL53L0X), interrupts.cpp, syscalls.cpp
   lib/        each library has its own include/ and src/
-    math/       pi, angle wrap, Vec2, Pose (matrix helpers for an EKF would go here); clamping is std::clamp
-    estimation/ fused encoder + gyro odometry (the EKF or line localiser goes here later)
-    control/    PID and the wheel speed controller (feed-forward + PID): pure logic, host-tested
-    nav/        arena geometry (Block, ray-casting, track test), A* planner and navigator: plain C++, no HAL
-    motor/      DC motor driver (direction pins + PWM channel injected)
-    i2c_bus/    shared register read/write helpers over the HAL I2C (used by mpu6050)
+    math/       pi, angle wrap, Vec2, Pose; clamping is std::clamp
+    control/    PID, wheel speed controller (feed-forward + PID), speed estimator: pure logic, host-tested
+    nav/        odometry, ToF layout, arena geometry, A* planner and navigator, flood fill and maze explorer: no HAL
+    i2c_bus/    shared register read/write helpers over the HAL I2C
     mpu6050/    gyro-z driver, uses an I2cBus
     vl53l0x_api/ ST VL53L0X API, portable core only (see its README)
     vl53l0x_impl/ the API's I2C functions implemented on I2cBus
+    hc05/       HC-05 Bluetooth UART helper
   test/       host unit tests
 ```
 
 ```
-pio run                          # build for the Black Pill
-pio run -t upload                # flash over ST-Link (change upload_protocol for DFU)
-pio device monitor               # 460800 baud telemetry on USART1
-pio test -e native               # host tests of math, estimation and nav, no hardware needed
-python -m sim.course.export_map   # regenerate include/map_data.h and the test reference from the sim
+pio run -e micromouse -t upload          # maze mode (the default environment), flash over ST-Link
+pio run -e obstacle_avoidance -t upload  # block-course mode
+pio device monitor                       # 460800 baud telemetry on USART1
+pio test -e native                       # host tests of lib/, no hardware needed
+python -m sim.course.export_map          # regenerate include/map_data.h and the test reference from the sim
 ```
 
-**What it does.** At power-on it estimates the gyro bias for ~2 s while locked on the line, plans on the stored map
-(`include/map_data.h`), then waits for the KEY button. After the press it runs at 30 Hz (4 ToF readings, fused odometry,
-navigation) with a 200 Hz timer interrupt (TIM11) for the wheel speed loop (the encoders are decoded by hardware), and stops over the finish line.
-Telemetry is one CSV line per step: time (ms), x, y (mm), heading (mrad), speed (mm/s), left and right duty (%), then the
-four ToF distances (mm).
+**What it does.** Both modes start the same way (`main.cpp`): sensors up, then ~2 s of gyro bias calibration with the
+robot standing still. Then the mode waits for the KEY button and runs at 30 Hz (4 ToF readings, fused odometry,
+navigation) while a 200 Hz timer interrupt (TIM11) closes the wheel speed loop; the encoders are decoded by hardware.
+The block-course mode plans on the stored map (`include/map_data.h`) and stops over the finish line, logging one CSV
+line per step: time (ms), x, y (mm), heading (mrad), speed (mm/s), left and right duty (%), then the four ToF
+distances (mm). The maze mode explores from the southwest cell, facing north, until it reaches a centre cell.
 
 **Implemented and checked.**
-- Builds clean for the F411: about 42 KB flash (8 %) and 80 KB RAM (61 %, the planner's static arrays are ~60 KB).
-  The ELF is hard-float (VFPv4-D16).
-- `lib/estimation` and `lib/nav` are a port of the sim's odometry, A* planner and navigator; `lib/math` and `lib/control` hold their shared types and the PID. `pio test -e native` passes 5 tests: geometry, the wheel speed controller,
-  odometry, the planner against the Python planner's path length on the same map (within 10 %), and a closed-loop run of
-  an ideal car through the map with two blocks that are not in it (it finishes and never overlaps a block).
+- Builds clean for the F411. Block course: about 43 KB flash (8 %) and 80 KB RAM (61 %, the planner's static arrays
+  are ~60 KB). Maze: about 38 KB flash and 5 KB RAM. The ELF is hard-float (VFPv4-D16).
+- `lib/nav` is a port of the sim's odometry, A* planner and navigator, plus the flood-fill maze explorer; `lib/math`
+  and `lib/control` hold their shared types, the PID and the speed estimate. `pio test -e native` passes 11 tests:
+  flood fill, geometry, odometry, the wheel speed controller and estimator, the planner against the Python planner's
+  path length on the same map, a closed-loop course run with two unmapped blocks, and closed-loop maze runs with fault
+  checks.
 
 **Not done / not verified.**
 - **Nothing has run on hardware.** The drivers (PWM, encoders, I2C, MPU6050, VL53L0X bring-up) are untested.

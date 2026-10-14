@@ -7,11 +7,9 @@
  *   - ES0287, STM32F411xC/E errata sheet (I2C peripheral limitations; BUSY can stay set after a bus error)
  *
  * @par Notes
- *   - Blocking and polled. Call it from the main loop only, never from an interrupt: the ToF sensors and the IMU
- *     share this bus, and nothing here is reentrant.
+ *   - Blocking and polled. Call it from the main loop only, never from an interrupt.
  *   - Addresses are 7-bit (0x68, not 0xD0); the shift for the HAL is done here.
  *   - Register addresses are 8 bit. Multi-byte reads use the device's auto-increment.
- *   - A failed transfer is reported by the return value; lastStatus()/lastError() say why.
  */
 #pragma once
 
@@ -22,8 +20,8 @@ class I2cBus {
 public:
     explicit I2cBus(I2C_HandleTypeDef* handle, uint32_t timeoutMs = 10) : h_(handle), timeoutMs_(timeoutMs) {}
 
-    bool writeReg(uint8_t addr7, uint8_t reg, uint8_t value);
     bool write(uint8_t addr7, uint8_t reg, const uint8_t* data, uint16_t len);
+    bool writeReg(uint8_t addr7, uint8_t reg, uint8_t value);
 
     bool read(uint8_t addr7, uint8_t reg, uint8_t* data, uint16_t len);
     std::optional<uint8_t> readReg(uint8_t addr7, uint8_t reg);

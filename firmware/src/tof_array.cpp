@@ -12,6 +12,7 @@
 #include "tof_array.h"
 
 #include "board.h"
+#include "config.h"
 #include "i2c_bus.h"
 #include "pins.h"
 #include "vl53l0x_api.h"
@@ -22,6 +23,8 @@ namespace {
 VL53L0X_Dev_t gDev[TOF_COUNT];
 bool gOk[TOF_COUNT];
 float gLast[TOF_COUNT];
+bool gReliable[TOF_COUNT];
+uint32_t gRangeTime[TOF_COUNT];
 I2cBus* gBus = nullptr;
 int gFailStreak = 0;  // consecutive failed bus reads, any sensor
 
@@ -29,9 +32,6 @@ GPIO_TypeDef* const XSHUT_PORT[] = TOF_XSHUT_PORTS;
 const uint16_t XSHUT_PIN[] = TOF_XSHUT_PINS;
 static_assert(sizeof(XSHUT_PORT) / sizeof(XSHUT_PORT[0]) == TOF_COUNT && sizeof(XSHUT_PIN) / sizeof(XSHUT_PIN[0]) == TOF_COUNT,
               "pins.h needs one XSHUT port and pin per sensor in tof::COUNT");
-
-constexpr float MAX_CM = 120.0f;
-constexpr float MIN_CM = 3.0f;
 
 inline uint8_t newAddress(int i) { return (uint8_t)(0x60 + 2 * i); }  // 8-bit form, 7-bit 0x30..0x34
 inline uint8_t addr7(int i) { return (uint8_t)(newAddress(i) >> 1); }
@@ -51,19 +51,19 @@ constexpr int RECOVER_AFTER_FAILURES = 10;
 
 enum class Sample { NotReady, Valid, NoTarget, BusError };
 
-Sample readSample(int i, float* cm) {
+Sample readSample(int i, float* range) {
     uint8_t b[RESULT_LEN];
     if (!gBus->read(addr7(i), REG_RESULT, b, RESULT_LEN)) return Sample::BusError;
     if ((b[0] & 0x07) == 0) return Sample::NotReady;
 
-    gBus->writeReg(addr7(i), REG_INT_CLEAR, 0x01);
-    gBus->writeReg(addr7(i), REG_INT_CLEAR, 0x00);
+    if (!gBus->writeReg(addr7(i), REG_INT_CLEAR, 0x01) ||
+        !gBus->writeReg(addr7(i), REG_INT_CLEAR, 0x00)) return Sample::BusError;
 
     uint8_t status = (b[1] & 0x78) >> 3;
     uint16_t signal = (uint16_t)((b[7] << 8) | b[8]);
-    uint16_t mm = (uint16_t)((b[11] << 8) | b[12]);
-    if (status != STATUS_GOOD || signal < MIN_SIGNAL_RAW || mm >= 1200) return Sample::NoTarget;
-    *cm = mm / 10.0f;
+    uint16_t rangeMm = (uint16_t)((b[11] << 8) | b[12]);
+    if (status != STATUS_GOOD || signal < MIN_SIGNAL_RAW || rangeMm >= tof::MAX_MM) return Sample::NoTarget;
+    *range = static_cast<float>(rangeMm);
     return Sample::Valid;
 }
 
@@ -84,7 +84,7 @@ bool bringUp(int i) {
     if (VL53L0X_PerformRefCalibration(d, &vhv, &phase) != VL53L0X_ERROR_NONE) return false;
     if (VL53L0X_PerformRefSpadManagement(d, &refSpadCount, &apertureSpads) != VL53L0X_ERROR_NONE) return false;
     if (VL53L0X_SetDeviceMode(d, VL53L0X_DEVICEMODE_CONTINUOUS_RANGING) != VL53L0X_ERROR_NONE) return false;
-    if (VL53L0X_SetMeasurementTimingBudgetMicroSeconds(d, 33000) != VL53L0X_ERROR_NONE) return false;
+    if (VL53L0X_SetMeasurementTimingBudgetMicroSeconds(d, cfg::CONTROL_PERIOD_MS * 1000) != VL53L0X_ERROR_NONE) return false;
     return VL53L0X_StartMeasurement(d) == VL53L0X_ERROR_NONE;
 }
 
@@ -97,7 +97,9 @@ int tofInit(I2cBus& bus) {
     for (int i = 0; i < TOF_COUNT; i++) {
         HAL_GPIO_WritePin(XSHUT_PORT[i], XSHUT_PIN[i], GPIO_PIN_RESET);
         gOk[i] = false;
-        gLast[i] = MAX_CM;
+        gLast[i] = tof::MAX_MM;
+        gReliable[i] = false;
+        gRangeTime[i] = 0;
     }
     HAL_Delay(10);
     int up = 0;
@@ -110,23 +112,27 @@ int tofInit(I2cBus& bus) {
     return up;
 }
 
-void tofRead(float cm[TOF_COUNT]) {
+void tofRead(float mm[TOF_COUNT]) {
     for (int i = 0; i < TOF_COUNT; i++) {
         if (gOk[i]) {
             float v;
             switch (readSample(i, &v)) {
                 case Sample::Valid:
                     gLast[i] = v;
+                    gReliable[i] = true;
+                    gRangeTime[i] = HAL_GetTick();
                     gFailStreak = 0;
                     break;
                 case Sample::NoTarget:  // anything but a good ranging counts as "nothing in range"
-                    gLast[i] = MAX_CM;
+                    gReliable[i] = false;
+                    gLast[i] = tof::MAX_MM;
                     gFailStreak = 0;
                     break;
                 case Sample::NotReady:  // keep the previous value until the next measurement completes
                     gFailStreak = 0;
                     break;
                 case Sample::BusError:
+                    gReliable[i] = false;
                     if (++gFailStreak >= RECOVER_AFTER_FAILURES) {
                         gBus->recover();
                         gFailStreak = 0;
@@ -135,8 +141,13 @@ void tofRead(float cm[TOF_COUNT]) {
             }
         }
         float v = gLast[i];
-        cm[i] = v < MIN_CM ? MIN_CM : (v > MAX_CM ? MAX_CM : v);
+        mm[i] = v < tof::MIN_MM ? tof::MIN_MM : (v > tof::MAX_MM ? tof::MAX_MM : v);
     }
 }
 
 bool tofOk(int index) { return gOk[index]; }
+
+bool tofReliable(int index, uint32_t maxAgeMs) {
+    return index >= 0 && index < TOF_COUNT && gOk[index] && gReliable[index] &&
+           HAL_GetTick() - gRangeTime[index] <= maxAgeMs;
+}

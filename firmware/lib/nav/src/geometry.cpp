@@ -36,9 +36,9 @@ float rayBlock(math::Vec2 o, math::Vec2 d, const Block& b, float maxRange) {
 bool insideTrack(math::Vec2 p, float m) {
     // left column, top band, right column (x0, y0, x1, y1)
     static const float r[3][4] = {
-        {0.0f, PAD_Y, 60.0f, ARENA_H},
-        {0.0f, 60.0f, ARENA_W, ARENA_H},
-        {120.0f, PAD_Y, ARENA_W, ARENA_H},
+        {0.0f, PAD_Y, 600.0f, ARENA_H},
+        {0.0f, 600.0f, ARENA_W, ARENA_H},
+        {1200.0f, PAD_Y, ARENA_W, ARENA_H},
     };
     for (int i = 0; i < 3; i++) {
         if (p.x >= r[i][0] - m && p.x <= r[i][2] + m && p.y >= r[i][1] - m && p.y <= r[i][3] + m) return true;

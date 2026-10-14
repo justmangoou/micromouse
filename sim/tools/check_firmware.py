@@ -3,7 +3,9 @@
     python -m sim.tools.check_firmware
 
 The sim keeps its own layout in sim/config.py (it can run other sensor layouts for experiments); the firmware defines each
-value once (lib/nav/include/tof_layout.h, include/config.h, lib/nav/include/navigator.h). Exit status 1 if any differ.
+value once (lib/nav/include/tof_layout.h, include/config.h, src/course.cpp; NavParams' defaults in navigator.h, which
+the host tests use). Firmware uses mm; the simulator uses cm.
+Convert at this comparison boundary. Exit status 1 if any differ.
 """
 import re
 import sys
@@ -38,21 +40,22 @@ def main():
     tof = (FW / "lib/nav/include/tof_layout.h").read_text()
     cfg = (FW / "include/config.h").read_text()
     nav = (FW / "lib/nav/include/navigator.h").read_text()
+    course = (FW / "src/course.cpp").read_text()
     checks = [
         ("tof angles (deg)", array(tof, "ANGLE_DEG"), np.degrees(C.TOF_ANGLES), 1e-3),
-        ("tof mount (cm)", array(tof, "MOUNT_CM").reshape(-1, 2), C.TOF_MOUNT, 1e-3),
+        ("tof mount (mm)", array(tof, "MOUNT_MM").reshape(-1, 2), C.TOF_MOUNT * 10, 1e-2),
         ("tof cone rays (deg)", array(tof, "FOV_DEG"), np.degrees(C.TOF_FOV), 1e-3),
-        ("tof range (cm)", np.array([scalar(tof, "MIN_CM"), scalar(tof, "MAX_CM")]), np.array([C.TOF_MIN, C.TOF_MAX]), 1e-3),
-        ("wheel radius", scalar(cfg, "WHEEL_RADIUS_CM"), C.WHEEL_R, 1e-3),
-        ("wheel track", scalar(cfg, "WHEEL_TRACK_CM"), C.TRACK, 1e-3),
+        ("tof range (mm)", np.array([scalar(tof, "MIN_MM"), scalar(tof, "MAX_MM")]), np.array([C.TOF_MIN, C.TOF_MAX]) * 10, 1e-2),
+        ("wheel radius", scalar(cfg, "WHEEL_RADIUS_MM"), C.WHEEL_R * 10, 1e-2),
+        ("wheel track", scalar(cfg, "WHEEL_TRACK_MM"), C.TRACK * 10, 1e-2),
         ("counts per rev", scalar(cfg, "COUNTS_PER_REV"), C.CPR, 1e-3),
-        ("V_FULL (config.h)", scalar(cfg, "V_FULL_CM_S"), C.V_FULL, 0.1),
-        ("V_FULL (navigator.h)", scalar(nav, "V_FULL"), C.V_FULL, 0.1),
-        ("wheel track (navigator.h)", scalar(nav, "WHEEL_TRACK"), C.TRACK, 1e-3),
-        ("speed loop Kp", scalar(cfg, "SPEED_KP"), C.SPEED_KP, 1e-6),
-        ("speed loop Ki", scalar(cfg, "SPEED_KI"), C.SPEED_KI, 1e-6),
+        ("V_FULL (config.h)", scalar(cfg, "V_FULL_MM_S"), C.V_FULL * 10, 1.0),
+        ("V_FULL (NavParams default)", scalar(nav, "vFull"), C.V_FULL * 10, 1.0),
+        ("wheel track (NavParams default)", scalar(nav, "track"), C.TRACK * 10, 1e-2),
+        ("speed loop Kp", scalar(cfg, "SPEED_KP"), C.SPEED_KP / 10, 1e-7),
+        ("speed loop Ki", scalar(cfg, "SPEED_KI"), C.SPEED_KI / 10, 1e-7),
         ("speed loop correction limit", scalar(cfg, "SPEED_CORR_LIMIT"), C.SPEED_OUTPUT_LIMIT, 1e-6),
-        ("start pose", np.array([scalar(cfg, "START_X"), scalar(cfg, "START_Y"), scalar(cfg, "START_TH")]), np.array(C.START_POSE), 1e-4),
+        ("start pose", np.array([scalar(course, "START_X"), scalar(course, "START_Y"), scalar(course, "START_TH")]), np.array(C.START_POSE) * np.array([10, 10, 1]), 1e-3),
     ]
     bad = 0
     for name, fw, sim, tol in checks:

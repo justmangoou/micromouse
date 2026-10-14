@@ -1,7 +1,7 @@
 /**
  * @file    planner.cpp
  * @brief   Planner implementation: A* with integer costs (octile heuristic, lazy-deletion heap), string pulling with
- *          a coarse stride, Chaikin smoothing, 1.5 cm resampling and the speed profile.
+ *          a coarse stride, Chaikin smoothing, 15 mm resampling and the speed profile.
  */
 #include "planner.h"
 
@@ -16,7 +16,7 @@ namespace {
 inline float cellX(int ix) { return ix * GRID_RES; }
 inline float cellY(int iy) { return PAD_Y + iy * GRID_RES; }
 
-// goal cells: x in [135, 165], y <= -12
+// goal cells: x in [1350, 1650], y <= -120 mm
 constexpr int GOAL_X0 = 68, GOAL_X1 = 82, GOAL_Y1 = 4;
 
 inline bool isGoal(int ix, int iy) { return ix >= GOAL_X0 && ix <= GOAL_X1 && iy <= GOAL_Y1; }
@@ -42,14 +42,14 @@ void Planner::setMap(const Block* blocks, int n) {
             uint8_t q = 0;
             if (insideTrack(p, -R_EDGE)) {
                 float c = mapClearance(p);
-                q = (uint8_t)std::clamp(c * 4.0f, 0.0f, 255.0f);
+                q = (uint8_t)std::clamp(c * 0.4f, 0.0f, 255.0f);
             }
             base_[iy * GRID_NX + ix] = q;
         }
     }
     for (int q = 0; q < 256; q++) {
-        float c = q * 0.25f;
-        float t = std::clamp((14.0f - c) / 14.0f, 0.0f, 1.0f);
+        float c = q * 2.5f;
+        float t = std::clamp((140.0f - c) / 140.0f, 0.0f, 1.0f);
         mult8_[q] = (uint8_t)(8.0f * (1.0f + CENTERING * t * t) + 0.5f);
     }
 }
@@ -61,14 +61,14 @@ int Planner::addExtra(math::Vec2 centre) {
 }
 
 float Planner::mapClearance(math::Vec2 p) const {
-    float best = 1e3f;
+    float best = 1e4f;
     for (int i = 0; i < nBlocks_; i++) best = fminf(best, blockClearance(p, blocks_[i]));
     return best;
 }
 
 float Planner::clearance(math::Vec2 p) const {
     float best = mapClearance(p);
-    for (int i = 0; i < nExtras_; i++) best = fminf(best, hypotf(p.x - extras_[i].x, p.y - extras_[i].y) - DISC_R);
+    for (int i = 0; i < nExtras_; i++) best = fminf(best, math::distance(p, extras_[i]) - DISC_R);
     return best;
 }
 
@@ -81,18 +81,18 @@ bool Planner::clearAtLeast(math::Vec2 p, float rad) const {
         if (blockClearance(p, b) < rad) return false;
     }
     for (int i = 0; i < nExtras_; i++) {
-        if (hypotf(p.x - extras_[i].x, p.y - extras_[i].y) - DISC_R < rad) return false;
+        if (math::distance(p, extras_[i]) - DISC_R < rad) return false;
     }
     return true;
 }
 
 bool Planner::segmentFree(math::Vec2 a, math::Vec2 b, float rad) const {
-    float len = hypotf(b.x - a.x, b.y - a.y);
-    int n = (int)len;
+    float len = math::distance(a, b);
+    int n = (int)(len / 10.0f);
     if (n < 2) n = 2;
     for (int k = 0; k <= n; k++) {
         float t = (float)k / n;
-        math::Vec2 p = {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t};
+        math::Vec2 p = math::lerp(a, b, t);
         if (!clearAtLeast(p, rad) || !insideTrack(p, -R_EDGE)) return false;
     }
     return true;
@@ -100,7 +100,7 @@ bool Planner::segmentFree(math::Vec2 a, math::Vec2 b, float rad) const {
 
 void Planner::buildWork() {
     memcpy(work_, base_, sizeof(work_));
-    const float reach = DISC_R + 15.0f;
+    const float reach = DISC_R + 150.0f;
     for (int e = 0; e < nExtras_; e++) {
         math::Vec2 c = extras_[e];
         int x0 = std::clamp((int)((c.x - reach) / GRID_RES), 0, GRID_NX - 1), x1 = std::clamp((int)((c.x + reach) / GRID_RES) + 1, 0, GRID_NX - 1);
@@ -108,8 +108,8 @@ void Planner::buildWork() {
         int y1 = std::clamp((int)((c.y + reach - PAD_Y) / GRID_RES) + 1, 0, GRID_NY - 1);
         for (int iy = y0; iy <= y1; iy++) {
             for (int ix = x0; ix <= x1; ix++) {
-                float d = hypotf(cellX(ix) - c.x, cellY(iy) - c.y) - DISC_R;
-                uint8_t q = (uint8_t)std::clamp(d * 4.0f, 0.0f, 255.0f);
+                float d = math::distance({cellX(ix), cellY(iy)}, c) - DISC_R;
+                uint8_t q = (uint8_t)std::clamp(d * 0.4f, 0.0f, 255.0f);
                 uint8_t& w = work_[iy * GRID_NX + ix];
                 if (q < w) w = q;
             }
@@ -155,7 +155,7 @@ const int8_t NEIGHBOR_STEPS[8][2] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}
 
 // Returns the number of points written to coarse_ (cell centres, start replaced by `start`), 0 on failure.
 int Planner::astar(math::Vec2 start, float radius) {
-    const uint8_t rq = (uint8_t)ceilf(radius * 4.0f);
+    const uint8_t rq = (uint8_t)ceilf(radius * 0.4f);
     memset(g_, 0xFF, sizeof(g_));
     memset(par_, 0xFF, sizeof(par_));
     memset(closed_, 0, sizeof(closed_));
@@ -213,7 +213,7 @@ int Planner::astar(math::Vec2 start, float radius) {
 
 bool Planner::plan(math::Vec2 start, Path& out) {
     buildWork();
-    static const float radii[3] = {R_ROBOT, R_ROBOT - 1.0f, 4.5f};  // squeeze through if the preferred margin is gone
+    static const float radii[3] = {R_ROBOT, R_ROBOT - 10.0f, 45.0f};  // squeeze through if the preferred margin is gone
     int n = 0;
     for (int r = 0; r < 3 && n == 0; r++) n = astar(start, radii[r]);
     if (n == 0) return false;
@@ -267,7 +267,7 @@ void Planner::finish(Path& out, int n) {
         }
         alt[m++] = cur[np - 1];
         bool ok = true;
-        for (int k = 0; k < m && ok; k++) ok = clearAtLeast(alt[k], R_ROBOT - 0.5f);
+        for (int k = 0; k < m && ok; k++) ok = clearAtLeast(alt[k], R_ROBOT - 5.0f);
         if (!ok) break;
         math::Vec2* t = cur;
         cur = alt;
@@ -281,25 +281,25 @@ void Planner::finish(Path& out, int n) {
     math::Vec2 d = {0.0f, -1.0f};
     if (np > 1) {
         float dx = last.x - cur[np - 2].x, dy = last.y - cur[np - 2].y;
-        float len = fmaxf(hypotf(dx, dy), 1e-6f);
+        float len = fmaxf(hypotf(dx, dy), 1e-5f);
         d = {dx / len, dy / len};
     }
-    cur[np++] = {last.x + d.x * 15.0f, last.y + d.y * 15.0f};
-    cur[np++] = {last.x + d.x * 30.0f, last.y + d.y * 30.0f};
+    cur[np++] = {last.x + d.x * 150.0f, last.y + d.y * 150.0f};
+    cur[np++] = {last.x + d.x * 300.0f, last.y + d.y * 300.0f};
 
     // resample at PATH_STEP
     float total = 0.0f;
-    for (int k = 0; k < np - 1; k++) total += hypotf(cur[k + 1].x - cur[k].x, cur[k + 1].y - cur[k].y);
+    for (int k = 0; k < np - 1; k++) total += math::distance(cur[k], cur[k + 1]);
     int m = 0, seg = 0;
     float segStart = 0.0f;
     for (float s = 0.0f; s < total && m < MAX_PATH; s += PATH_STEP) {
-        while (seg < np - 2 && s > segStart + hypotf(cur[seg + 1].x - cur[seg].x, cur[seg + 1].y - cur[seg].y)) {
-            segStart += hypotf(cur[seg + 1].x - cur[seg].x, cur[seg + 1].y - cur[seg].y);
+        while (seg < np - 2 && s > segStart + math::distance(cur[seg], cur[seg + 1])) {
+            segStart += math::distance(cur[seg], cur[seg + 1]);
             seg++;
         }
-        float len = fmaxf(hypotf(cur[seg + 1].x - cur[seg].x, cur[seg + 1].y - cur[seg].y), 1e-6f);
+        float len = fmaxf(math::distance(cur[seg], cur[seg + 1]), 1e-5f);
         float t = std::clamp((s - segStart) / len, 0.0f, 1.0f);
-        out.p[m] = {cur[seg].x + (cur[seg + 1].x - cur[seg].x) * t, cur[seg].y + (cur[seg + 1].y - cur[seg].y) * t};
+        out.p[m] = math::lerp(cur[seg], cur[seg + 1], t);
         out.s[m] = s;
         m++;
     }
@@ -326,7 +326,7 @@ void Planner::finish(Path& out, int n) {
         float clr = clearance(out.p[k]);
         float edgeClr = edgeMargin(out.p[k]);
         float vTurn = std::clamp(1.0f / (1.0f + 2.0f * turn), 0.35f, 1.0f);
-        float vClr = std::clamp(0.6f + 0.4f * (clr - R_ROBOT) / 6.0f, 0.6f, 1.0f);
+        float vClr = std::clamp(0.6f + 0.4f * (clr - R_ROBOT) / 60.0f, 0.6f, 1.0f);
         float vEdge = std::clamp(0.5f + 0.5f * (edgeClr - R_EDGE) / EDGE_SLOW_START, 0.5f, 1.0f);
         out.v[k] = vTurn * vClr * vEdge;
     }

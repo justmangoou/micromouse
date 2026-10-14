@@ -1,6 +1,6 @@
 /**
  * @file    test_main.cpp
- * @brief   Host tests for math and nav: geometry, odometry, the planner against the Python
+ * @brief   Host tests for control and nav: geometry, odometry, the planner against the Python
  *          planner, and a closed-loop run. Run with `pio test -e native` from firmware/.
  */
 #include <unity.h>
@@ -9,14 +9,16 @@
 
 #include <algorithm>
 
+#include "math_util.h"
+
 #include "../../include/map_data.h"
 #include "geometry.h"
 #include "floodfill.h"
+#include "micromouse.h"
 #include "navigator.h"
 #include "odometry.h"
 #include "planner.h"
 #include "speed_controller.h"
-#include "speed_estimator.h"
 #include "tof_layout.h"
 #include "ref_data.h"
 
@@ -26,6 +28,7 @@ using namespace math;
 static nav::Planner gPlanner;  // ~60 KB, keep it off the stack
 static nav::Navigator gNav;
 static nav::Path gPath;
+static const nav::NavParams kCar;  // the car the closed-loop test simulates: same vFull and track as the navigator's
 
 void setUp() {}
 void tearDown() {}
@@ -89,73 +92,115 @@ static void buildMap(Block* out) {
 
 void test_geometry() {
     Block b(0, 0, 0);
-    TEST_ASSERT_FLOAT_WITHIN(1e-4, 5.0f, blockClearance({10, 0}, b));
-    TEST_ASSERT_FLOAT_WITHIN(1e-4, 0.0f, blockClearance({2, 1}, b));
-    TEST_ASSERT_FLOAT_WITHIN(1e-3, 5.0f, rayBlock({-10, 0}, {1, 0}, b, 120));
-    TEST_ASSERT_FLOAT_WITHIN(1e-3, 120.0f, rayBlock({-10, 20}, {1, 0}, b, 120));
-    TEST_ASSERT_FLOAT_WITHIN(1e-3, 120.0f, rayBlock({-10, 0}, {-1, 0}, b, 120));  // block behind the ray
+    TEST_ASSERT_FLOAT_WITHIN(1e-4, 50.0f, blockClearance({100, 0}, b));
+    TEST_ASSERT_FLOAT_WITHIN(1e-4, 0.0f, blockClearance({20, 10}, b));
+    TEST_ASSERT_FLOAT_WITHIN(1e-3, 50.0f, rayBlock({-100, 0}, {1, 0}, b, 1200));
+    TEST_ASSERT_FLOAT_WITHIN(1e-3, 1200.0f, rayBlock({-100, 200}, {1, 0}, b, 1200));
+    TEST_ASSERT_FLOAT_WITHIN(1e-3, 1200.0f, rayBlock({-100, 0}, {-1, 0}, b, 1200));  // block behind the ray
     Block rot(0, 0, PI / 4);  // corner pointing at the origin axis
-    TEST_ASSERT_FLOAT_WITHIN(1e-2, 10.0f - BLOCK_HALF_DIAG, rayBlock({-10, 0}, {1, 0}, rot, 120));
-    TEST_ASSERT_TRUE(insideTrack({30, -8}, 0));
-    TEST_ASSERT_TRUE(insideTrack({90, 90}, 0));
-    TEST_ASSERT_FALSE(insideTrack({90, 30}, 0));  // the forbidden middle of the U
-    TEST_ASSERT_TRUE(insideTrack({61, 30}, TAPE_HALF + 0.5f));
+    TEST_ASSERT_FLOAT_WITHIN(1e-2, 100.0f - BLOCK_HALF_DIAG, rayBlock({-100, 0}, {1, 0}, rot, 1200));
+    TEST_ASSERT_TRUE(insideTrack({300, -80}, 0));
+    TEST_ASSERT_TRUE(insideTrack({900, 900}, 0));
+    TEST_ASSERT_FALSE(insideTrack({900, 300}, 0));  // the forbidden middle of the U
+    TEST_ASSERT_TRUE(insideTrack({610, 300}, TAPE_HALF + 5.0f));
 }
 
 void test_odometry_straight_and_turn() {
     FusedOdometry odo;
     odo.reset({0, 0, PI / 2});
     for (int i = 0; i < 30; i++) odo.update(56, 56, 0.0f, 1.0f / 30.0f);
-    float cm = 56 * 2.0f * PI * 1.6f / 420.0f * 30;
-    TEST_ASSERT_FLOAT_WITHIN(0.1f, cm, odo.pose.y);
-    TEST_ASSERT_FLOAT_WITHIN(0.1f, 0.0f, odo.pose.x);
+    float mm = 56 * 2.0f * PI * 16.0f / 420.0f * 30;
+    TEST_ASSERT_FLOAT_WITHIN(1.0f, mm, odo.pose.y);
+    TEST_ASSERT_FLOAT_WITHIN(1.0f, 0.0f, odo.pose.x);
 
     odo.reset({0, 0, 0});
     for (int i = 0; i < 30; i++) odo.update(-10, 10, PI / 2, 1.0f / 30.0f);  // 90 deg in 1 s
     TEST_ASSERT_FLOAT_WITHIN(0.02f, PI / 2, odo.pose.th);
 
     odo.reset({0, 0, 0});
-    for (int i = 0; i < 60; i++) odo.update(0, 0, 0.01f, 1.0f / 30.0f, true);  // bias calibration
-    TEST_ASSERT_TRUE(odo.bias > 0.0092f && odo.bias <= 0.01f);
+    // A gyro-observed turn must not be learned away when encoders report zero.
+    for (int i = 0; i < 60; i++) odo.update(0, 0, 0.01f, 1.0f / 30.0f);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.0196f, odo.pose.th);
+}
+
+void test_pid_derivative_history() {
+    speed_control::Pid pid(0, 0, 1, 0, 0);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 4, pid.update(2, 0, 0.5f));
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 2, pid.update(3, 0, 0.5f));
+    TEST_ASSERT_EQUAL_FLOAT(0, pid.update(3, 0, 0.5f));
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, -4, pid.update(1, 0, 0.5f));
+    pid.reset();
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 2, pid.update(1, 0, 0.5f));
 }
 
 void test_speed_controller() {
-    control::Pid pid(0.004f, 0.02f, 0.0f, 20.0f, 0.3f);
-    control::SpeedController c(62.2f, true, pid);
+    speed_control::Pid pid(0.0004f, 0.002f, 0.0f, 200.0f, 0.3f);
+    // One count per mm/s and alpha 1 isolate PID behavior from filtering.
+    speed_control::SpeedController c(622.0f, 0.005f, 0.005f, pid, 10.0f, 1.0f);
+    c.update_target(311.0f);
     // on target: the PID adds nothing, only the feed-forward remains
-    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.5f, c.update(31.1f, 31.1f, 0.005f));
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.5f, c.update_counts(311));
     // too slow: more duty than the feed-forward alone
-    TEST_ASSERT_TRUE(c.update(31.1f, 20.0f, 0.005f) > 0.5f);
+    TEST_ASSERT_TRUE(c.update_counts(200) > 0.5f);
     // a target of about zero resets the PID: the wound-up integral is gone afterwards
-    c.update(0.5f, 0.0f, 0.005f);
-    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.5f, c.update(31.1f, 31.1f, 0.005f));
-    // open loop: feed-forward only, whatever the measurement says
-    control::SpeedController open(62.2f, false, pid);
-    TEST_ASSERT_FLOAT_WITHIN(1e-4f, -0.5f, open.update(-31.1f, 0.0f, 0.005f));
+    c.update_target(5.0f);
+    c.update_counts(0);
+    c.update_target(311.0f);
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.5f, c.update_counts(311));
+    c.update_target(-311.0f);
+    // Reverse targets use the same feedback loop: too slow means more negative duty.
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, -0.5f, c.update_counts(-311));
+    TEST_ASSERT_TRUE(c.update_counts(-200) < -0.5f);
+    // Stopping preserves measured motion and clears PID history before restarting.
+    const float movingSpeed = c.speed();
+    c.stop();
+    TEST_ASSERT_EQUAL_FLOAT(movingSpeed, c.speed());
+    c.update_target(-311.0f);
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, -0.5f, c.update_counts(-311));
+    c.stop();
+    TEST_ASSERT_EQUAL_FLOAT(0, c.update_counts(-100));
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, -100, c.speed());
+    // Reset clears the active target, filtered speed, and accumulated PID error.
+    c.reset();
+    TEST_ASSERT_EQUAL_FLOAT(0, c.speed());
+    TEST_ASSERT_EQUAL_FLOAT(0, c.update_counts(0));
+    c.update_target(311.0f);
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.5f, c.update_counts(311));
+}
+
+void test_speed_controller_deadband() {
+    speed_control::SpeedController c(622.0f, 0.005f, 0.005f,
+                               speed_control::Pid(0.001f, 0, 0, 0, 0), 20.0f, 1.0f);
+    for (float sign : {-1.0f, 1.0f}) {
+        c.update_target(sign * 15.0f);
+        TEST_ASSERT_FLOAT_WITHIN(1e-6f, sign * 15.0f / 622.0f, c.update_counts(0));
+        c.update_target(sign * 20.0f);
+        TEST_ASSERT_FLOAT_WITHIN(1e-6f, sign * (20.0f / 622.0f + 0.02f), c.update_counts(0));
+    }
 }
 
 void test_counter_delta_wraps() {
-    TEST_ASSERT_EQUAL_INT32(5, control::counterDelta(105, 100));
-    TEST_ASSERT_EQUAL_INT32(-5, control::counterDelta(95, 100));
-    TEST_ASSERT_EQUAL_INT32(10, control::counterDelta(4, 65530));      // forward through the 16-bit wrap
-    TEST_ASSERT_EQUAL_INT32(-10, control::counterDelta(65530, 4));     // backward through it
-    TEST_ASSERT_EQUAL_INT32(0, control::counterDelta(777, 777));
+    TEST_ASSERT_EQUAL_INT32(5, speed_control::counterDelta(105, 100));
+    TEST_ASSERT_EQUAL_INT32(-5, speed_control::counterDelta(95, 100));
+    TEST_ASSERT_EQUAL_INT32(10, speed_control::counterDelta(4, 65530));      // forward through the 16-bit wrap
+    TEST_ASSERT_EQUAL_INT32(-10, speed_control::counterDelta(65530, 4));     // backward through it
+    TEST_ASSERT_EQUAL_INT32(0, speed_control::counterDelta(777, 777));
 }
 
 void test_speed_estimator() {
-    const float cmPerCount = 0.024f, dt = 0.005f;
-    control::SpeedEstimator est(cmPerCount, dt);
+    const float mmPerCount = 0.24f, dt = 0.005f;
+    speed_control::SpeedController est(622.0f, mmPerCount, dt, speed_control::Pid{});
     TEST_ASSERT_EQUAL_FLOAT(0.0f, est.speed());
-    // a steady 10 counts per period is 48 cm/s; the first-order filter (alpha 0.4) gets there from zero
-    float v = 0;
-    for (int i = 0; i < 40; i++) v = est.update(10);
-    TEST_ASSERT_FLOAT_WITHIN(0.05f, 10 * cmPerCount / dt, v);
+    // a steady 10 counts per period is 480 mm/s; the first-order filter (alpha 0.4) gets there from zero
+    for (int i = 0; i < 40; i++) est.update_counts(10);
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, 10 * mmPerCount / dt, est.speed());
     // the first sample alone only moves it alpha of the way
-    control::SpeedEstimator fresh(cmPerCount, dt);
-    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.4f * 10 * cmPerCount / dt, fresh.update(10));
+    speed_control::SpeedController fresh(622.0f, mmPerCount, dt, speed_control::Pid{});
+    TEST_ASSERT_EQUAL_FLOAT(0, fresh.update_counts(10));
+    TEST_ASSERT_FLOAT_WITHIN(1e-2f, 0.4f * 10 * mmPerCount / dt, fresh.speed());
     // backwards counts give a negative speed
-    for (int i = 0; i < 40; i++) v = est.update(-10);
-    TEST_ASSERT_FLOAT_WITHIN(0.05f, -10 * cmPerCount / dt, v);
+    for (int i = 0; i < 40; i++) est.update_counts(-10);
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, -10 * mmPerCount / dt, est.speed());
     est.reset();
     TEST_ASSERT_EQUAL_FLOAT(0.0f, est.speed());
 }
@@ -164,15 +209,15 @@ void test_planner_matches_python() {
     Block blocks[MAX_MAP];
     buildMap(blocks);
     gPlanner.setMap(blocks, MAP_BLOCK_COUNT);
-    TEST_ASSERT_TRUE(gPlanner.plan({30, -8}, gPath));
+    TEST_ASSERT_TRUE(gPlanner.plan({300, -80}, gPath));
     TEST_ASSERT_TRUE(gPath.n > 50);
     TEST_ASSERT_FLOAT_WITHIN(0.1f * REF_PATH_LENGTH, REF_PATH_LENGTH, gPath.s[gPath.n - 1]);
-    TEST_ASSERT_TRUE(gPath.p[gPath.n - 1].y < -10.0f);
-    TEST_ASSERT_TRUE(gPath.p[gPath.n - 1].x > 135.0f && gPath.p[gPath.n - 1].x < 165.0f);
+    TEST_ASSERT_TRUE(gPath.p[gPath.n - 1].y < -100.0f);
+    TEST_ASSERT_TRUE(gPath.p[gPath.n - 1].x > 1350.0f && gPath.p[gPath.n - 1].x < 1650.0f);
     for (int i = 0; i < gPath.n; i++) {
-        if (gPath.p[i].y < -2.0f) continue;  // below the line is the run-through
-        TEST_ASSERT_TRUE(insideTrack(gPath.p[i], -2.0f));
-        TEST_ASSERT_TRUE(gPlanner.clearance(gPath.p[i]) >= 4.0f);
+        if (gPath.p[i].y < -20.0f) continue;  // below the line is the run-through
+        TEST_ASSERT_TRUE(insideTrack(gPath.p[i], -20.0f));
+        TEST_ASSERT_TRUE(gPlanner.clearance(gPath.p[i]) >= 40.0f);
     }
 }
 
@@ -184,17 +229,17 @@ struct World {
     int n = 0;
 };
 
-void tofFromWorld(const Pose& p, const World& w, float out[NUM_TOF]) {
+void tofFromWorld(const Pose& p, const World& w, float out[tof::COUNT]) {
     float c = cosf(p.th), s = sinf(p.th);
-    for (int k = 0; k < NUM_TOF; k++) {
-        Vec2 o = {p.x + c * tof::MOUNT_CM[k][0] - s * tof::MOUNT_CM[k][1], p.y + s * tof::MOUNT_CM[k][0] + c * tof::MOUNT_CM[k][1]};
-        float best = tof::MAX_CM;
+    for (int k = 0; k < tof::COUNT; k++) {
+        Vec2 o = {p.x + c * tof::MOUNT_MM[k][0] - s * tof::MOUNT_MM[k][1], p.y + s * tof::MOUNT_MM[k][0] + c * tof::MOUNT_MM[k][1]};
+        float best = tof::MAX_MM;
         for (int f = 0; f < tof::FOV_RAYS; f++) {
             float a = p.th + tof::ANGLE[k] + tof::FOV[f];
             Vec2 d = {cosf(a), sinf(a)};
-            for (int b = 0; b < w.n; b++) best = fminf(best, rayBlock(o, d, w.blocks[b], tof::MAX_CM));
+            for (int b = 0; b < w.n; b++) best = fminf(best, rayBlock(o, d, w.blocks[b], tof::MAX_MM));
         }
-        out[k] = std::clamp(best, tof::MIN_CM, tof::MAX_CM);
+        out[k] = std::clamp(best, tof::MIN_MM, tof::MAX_MM);
     }
 }
 
@@ -202,10 +247,10 @@ bool bodyOverlaps(const Pose& p, const World& w) {
     float c = cosf(p.th), s = sinf(p.th);
     for (int ix = -2; ix <= 2; ix++) {
         for (int iy = -2; iy <= 2; iy++) {
-            float lx = ix * 3.125f, ly = iy * 2.5f;  // 12.5 x 10 cm body
+            float lx = ix * 31.25f, ly = iy * 25.0f;  // 125 x 100 mm body
             Vec2 q = {p.x + c * lx - s * ly, p.y + s * lx + c * ly};
             for (int b = 0; b < w.n; b++)
-                if (blockClearance(q, w.blocks[b]) < 0.3f) return true;
+                if (blockClearance(q, w.blocks[b]) < 3.0f) return true;
         }
     }
     return false;
@@ -220,27 +265,27 @@ void test_closed_loop_with_unmapped_blocks() {
         world.blocks[world.n++] = Block(MAP_BLOCKS[i][0], MAP_BLOCKS[i][1], MAP_BLOCKS[i][2]);
     // Generously clear of MAP_BLOCKS and of the x:[135,165] goal-approach column: this test validates that the
     // Navigator detects and routes around an unmapped block, not that it can thread a minimal, near-adversarial gap.
-    world.blocks[world.n++] = Block(170.0f, 95.0f, 0.3f);   // random block, top-right cell
-    world.blocks[world.n++] = Block(170.0f, 15.0f, -0.2f);  // random block, finish cell
+    world.blocks[world.n++] = Block(1700.0f, 950.0f, 0.3f);   // random block, top-right cell
+    world.blocks[world.n++] = Block(1700.0f, 150.0f, -0.2f);  // random block, finish cell
 
     gNav = Navigator();
     gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
-    Pose truth = {30.0f, -8.0f, PI / 2};
+    Pose truth = {300.0f, -80.0f, PI / 2};
     gNav.start(truth, 0.0f);
 
     const float dt = 1.0f / 30.0f;
     const float tau = 0.06f;
-    float w[2] = {0, 0};  // wheel speeds, cm/s
+    float w[2] = {0, 0};  // wheel speeds, mm/s
     bool finished = false, hit = false;
     float t = 0, prevV = 0;
     for (; t < 60.0f && !finished; t += dt) {
-        float tof[NUM_TOF];
+        float tof[tof::COUNT];
         tofFromWorld(truth, world, tof);
         float duty[2];
         gNav.step(truth, prevV, tof, t, duty);  // perfect localisation: this test is about planning and tracking
         for (int k = 0; k < 3; k++) {            // physics substeps
-            for (int i = 0; i < 2; i++) w[i] += (duty[i] * V_FULL * 0.925f - w[i]) * (1.0f - expf(-dt / 3 / tau));
-            float v = 0.5f * (w[0] + w[1]), om = (w[1] - w[0]) / WHEEL_TRACK;
+            for (int i = 0; i < 2; i++) w[i] += (duty[i] * kCar.vFull * 0.925f - w[i]) * (1.0f - expf(-dt / 3 / tau));
+            float v = 0.5f * (w[0] + w[1]), om = (w[1] - w[0]) / kCar.track;
             float mid = truth.th + 0.5f * om * dt / 3;
             truth.x += v * cosf(mid) * dt / 3;
             truth.y += v * sinf(mid) * dt / 3;
@@ -248,11 +293,125 @@ void test_closed_loop_with_unmapped_blocks() {
             prevV = v;
         }
         if (bodyOverlaps(truth, world)) hit = true;
-        finished = truth.y < -9.0f && truth.x > 125.0f && truth.x < 175.0f && gNav.progress() > 0.8f;
+        finished = truth.y < -90.0f && truth.x > 1250.0f && truth.x < 1750.0f && gNav.progress() > 0.8f;
     }
     TEST_ASSERT_TRUE_MESSAGE(finished, "did not reach the finish line");
     TEST_ASSERT_FALSE_MESSAGE(hit, "the body overlapped a block");
     TEST_ASSERT_TRUE_MESSAGE(t < 40.0f, "too slow");
+}
+
+// Ideal range rays against the maze perimeter and a wall blocking the first
+// north passage. Exercise gyro-heading turns and cell advancement together.
+static void mazeRanges(const math::Pose& pose, float ranges[tof::COUNT], int layout) {
+    for (int k = 0; k < tof::COUNT; ++k) {
+        float c = cosf(pose.th), s = sinf(pose.th);
+        float ox = pose.x + c * tof::MOUNT_MM[k][0] - s * tof::MOUNT_MM[k][1];
+        float oy = pose.y + s * tof::MOUNT_MM[k][0] + c * tof::MOUNT_MM[k][1];
+        float dx = cosf(pose.th + tof::ANGLE[k]), dy = sinf(pose.th + tof::ANGLE[k]);
+        float r = tof::MAX_MM;
+        for (float x : {0.0f, 540.0f, 180.0f}) {
+            if (x == 180 && layout != 2) continue;
+            if (fabsf(dx) < 1e-6f) continue;
+            float t = (x - ox) / dx, y = oy + t * dy;
+            float begin = x == 180 ? 180 : 0, end = x == 180 ? 360 : 540;
+            if (t >= 0 && y >= begin && y <= end) r = fminf(r, t);
+        }
+        for (float y : {0.0f, 540.0f, 180.0f, 360.0f}) {
+            if ((y == 180 && layout != 1) || (y == 360 && layout != 2) || fabsf(dy) < 1e-6f) continue;
+            float t = (y - oy) / dy, x = ox + t * dx;
+            float end = (y == 180 || y == 360) ? 180 : 540;
+            if (t >= 0 && x >= 0 && x <= end) r = fminf(r, t);
+        }
+        ranges[k] = fmaxf(tof::MIN_MM, r);
+    }
+}
+
+void test_micromouse_closed_loop() {
+    for (int layout : {0, 1, 2}) { // open, blocked entry, dead end requiring a 180-degree turn
+        nav::MicromouseParams p;
+        p.width = p.height = 3;
+        nav::Micromouse mouse(p);
+        TEST_ASSERT_TRUE(mouse.start(0));
+        math::Pose pose = mouse.startPose();
+        float actual[2] = {0, 0};
+        bool reliable[tof::COUNT] = {true, true, true, true};
+        const float dt = 0.033f;
+        bool turned = false, backtracked = false;
+        for (float t = 0; t < 30; t += dt) {
+            float ranges[tof::COUNT], command[2];
+            mazeRanges(pose, ranges, layout);
+            mouse.step(pose, ranges, reliable, t, command);
+            turned |= mouse.state() == nav::Micromouse::State::Turning;
+            backtracked |= mouse.heading() == nav::Direction::South;
+            TEST_ASSERT_NOT_EQUAL(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
+            if (mouse.state() == nav::Micromouse::State::Done) break;
+            for (int k = 0; k < 2; ++k) actual[k] += (command[k] - actual[k]) * (1 - expf(-dt / 0.04f));
+            float v = (actual[0] + actual[1]) / 2, w = (actual[1] - actual[0]) / p.track;
+            math::Pose previous = pose;
+            pose.x += v * cosf(pose.th + w * dt / 2) * dt;
+            pose.y += v * sinf(pose.th + w * dt / 2) * dt;
+            pose.th += w * dt;
+            TEST_ASSERT_TRUE(pose.x > 60 && pose.y > 60 && pose.x < 480 && pose.y < 480);
+            if (layout == 1 && pose.x < 180) TEST_ASSERT_TRUE(pose.y < 180);
+            if (layout == 2 && pose.x < 180) TEST_ASSERT_TRUE(pose.y < 360);
+            if (layout == 2 && (previous.x - 180) * (pose.x - 180) < 0) {
+                float crossingY = previous.y + (pose.y - previous.y) * (180 - previous.x) / (pose.x - previous.x);
+                TEST_ASSERT_TRUE(crossingY < 180 || crossingY > 360);
+            }
+        }
+        TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Done), static_cast<int>(mouse.state()));
+        TEST_ASSERT_TRUE(turned);
+        TEST_ASSERT_EQUAL_INT(1, mouse.cell().x);
+        TEST_ASSERT_EQUAL_INT(1, mouse.cell().y);
+        TEST_ASSERT_TRUE(hypotf(pose.x - 270, pose.y - 270) < 10.0f);
+        if (layout == 2) TEST_ASSERT_TRUE(backtracked);
+        if (layout == 1) TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Passage::Wall),
+                                               static_cast<int>(mouse.maze().passage({0, 0}, nav::Direction::North)));
+    }
+}
+
+void test_micromouse_faults_stop_commands() {
+    nav::Micromouse mouse;
+    TEST_ASSERT_TRUE(mouse.start(0));
+    float ranges[tof::COUNT] = {300, 300, 300, 300}, command[2];
+    bool reliable[tof::COUNT] = {true, true, true, true};
+    math::Pose pose = mouse.startPose();
+    mouse.step(pose, ranges, reliable, 0, command); // verified open, starts advance
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Advancing), static_cast<int>(mouse.state()));
+    TEST_ASSERT_EQUAL_INT(0, mouse.cell().y); // not committed before reaching target
+    mouse.step(pose, ranges, reliable, 0.033f, command);
+    TEST_ASSERT_TRUE(command[0] > 0 && command[1] > 0);
+    reliable[1] = false;
+    mouse.step(pose, ranges, reliable, 0.066f, command);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
+    TEST_ASSERT_EQUAL_FLOAT(0, command[0]);
+    TEST_ASSERT_EQUAL_FLOAT(0, command[1]);
+
+    mouse.start(0);
+    mouse.step(pose, ranges, reliable, 0, command);
+    mouse.step(pose, ranges, reliable, 1.1f, command);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
+    reliable[1] = true;
+    mouse.start(0);
+    mouse.step(pose, ranges, reliable, 0, command);
+    mouse.step(pose, ranges, reliable, 6.1f, command); // stalled advancement
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
+    TEST_ASSERT_EQUAL_FLOAT(0, command[0]);
+
+    mouse.start(0);
+    mouse.step(pose, ranges, reliable, 0, command);
+    ranges[1] = ranges[2] = tof::MIN_MM; // unexpected obstacle during advance
+    mouse.step(pose, ranges, reliable, 0.033f, command);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
+    TEST_ASSERT_EQUAL_FLOAT(0, command[0]);
+    TEST_ASSERT_EQUAL_FLOAT(0, command[1]);
+
+    mouse.start(0);
+    ranges[1] = ranges[2] = tof::MAX_MM; // no-target is not evidence of open space
+    mouse.step(pose, ranges, reliable, 0, command);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Passage::Unknown),
+                          static_cast<int>(mouse.maze().passage({0, 0}, nav::Direction::North)));
+    TEST_ASSERT_EQUAL_FLOAT(0, command[0]);
 }
 
 int main() {
@@ -262,9 +421,13 @@ int main() {
     RUN_TEST(test_geometry);
     RUN_TEST(test_odometry_straight_and_turn);
     RUN_TEST(test_speed_controller);
+    RUN_TEST(test_speed_controller_deadband);
+    RUN_TEST(test_pid_derivative_history);
     RUN_TEST(test_counter_delta_wraps);
     RUN_TEST(test_speed_estimator);
     RUN_TEST(test_planner_matches_python);
     RUN_TEST(test_closed_loop_with_unmapped_blocks);
+    RUN_TEST(test_micromouse_closed_loop);
+    RUN_TEST(test_micromouse_faults_stop_commands);
     return UNITY_END();
 }
