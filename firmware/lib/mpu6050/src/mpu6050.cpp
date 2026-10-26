@@ -33,7 +33,6 @@ bool Mpu6050::write(uint8_t reg, uint8_t val) {
 
 bool Mpu6050::init() {
     initialized_ = false;
-    gyroBiasZ_ = 0.0f;
     auto id = bus_.readReg(addr7_, REG_WHO_AM_I);
     if (!id || *id != WHO_AM_I_VAL)
         return false;

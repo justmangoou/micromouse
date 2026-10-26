@@ -11,17 +11,18 @@
  */
 #include "board.h"
 
-#include "pins.h"
 #include "config.h"
-#include "hc05.h"
 
 I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart1;
-Hc05 bluetooth(&huart1);
 ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim2, htim3, htim4, htim11;
 
+volatile BoardFault gBoardFault = BoardFault::None;
+
 namespace {
+
+[[noreturn]] void halt(BoardFault fault);
 
 void clockConfig() {
     __HAL_RCC_PWR_CLK_ENABLE();
@@ -36,7 +37,7 @@ void clockConfig() {
     osc.PLL.PLLN = 200;                   // 200 MHz VCO
     osc.PLL.PLLP = RCC_PLLP_DIV2;         // 100 MHz SYSCLK
     osc.PLL.PLLQ = 4;
-    HAL_RCC_OscConfig(&osc);
+    if (HAL_RCC_OscConfig(&osc) != HAL_OK) halt(BoardFault::Clock);
 
     RCC_ClkInitTypeDef clk = {};
     clk.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
@@ -44,7 +45,7 @@ void clockConfig() {
     clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
     clk.APB1CLKDivider = RCC_HCLK_DIV2;  // 50 MHz, timers on APB1 run at 100 MHz
     clk.APB2CLKDivider = RCC_HCLK_DIV1;  // 100 MHz
-    HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_3);
+    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_3) != HAL_OK) halt(BoardFault::Clock);
 }
 
 void gpioInit() {
@@ -58,31 +59,33 @@ void gpioInit() {
     g.Mode = GPIO_MODE_OUTPUT_PP;
     g.Pull = GPIO_NOPULL;
     g.Speed = GPIO_SPEED_FREQ_LOW;
-    g.Pin = GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5 | PIN_L2_PIN;
+    g.Pin = GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5 | L2_PIN;
     HAL_GPIO_WritePin(GPIOB, g.Pin, GPIO_PIN_RESET);
     HAL_GPIO_Init(GPIOB, &g);
-    g.Pin = GPIO_PIN_15 | PIN_L1_PIN;
+    g.Pin = GPIO_PIN_15 | L1_PIN;
     HAL_GPIO_WritePin(GPIOA, g.Pin, GPIO_PIN_RESET);
     HAL_GPIO_Init(GPIOA, &g);
 
     // status LED (active low): off
-    g.Pin = PIN_LED_PIN;
-    HAL_GPIO_WritePin(PIN_LED_PORT, PIN_LED_PIN, GPIO_PIN_SET);
-    HAL_GPIO_Init(PIN_LED_PORT, &g);
+    g.Pin = LED_PIN;
+    HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
+    HAL_GPIO_Init(LED_PORT, &g);
 
     // button and switches with pull-up
     g.Mode = GPIO_MODE_INPUT;
     g.Pull = GPIO_PULLUP;
-    g.Pin = PIN_BUTTON_PIN;
-    HAL_GPIO_Init(PIN_BUTTON_PORT, &g);
+    g.Pin = BUTTON_PIN;
+    HAL_GPIO_Init(BUTTON_PORT, &g);
+    g.Pin = BUTTON2_PIN;
+    HAL_GPIO_Init(BUTTON2_PORT, &g);
     g.Pin = GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14;
     HAL_GPIO_Init(SW_PORT, &g);
 
     // battery sense: analog
     g.Mode = GPIO_MODE_ANALOG;
     g.Pull = GPIO_NOPULL;
-    g.Pin = PIN_BAT_PIN;
-    HAL_GPIO_Init(PIN_BAT_PORT, &g);
+    g.Pin = BAT_PIN;
+    HAL_GPIO_Init(BAT_PORT, &g);
 
     // PWM pins: TIM3 CH1/CH2 on PA6/PA7, CH3/CH4 on PB0/PB1
     g.Mode = GPIO_MODE_AF_PP;
@@ -131,7 +134,7 @@ void uartInit() {
     huart1.Init.Mode = UART_MODE_TX_RX;
     huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
     huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-    HAL_UART_Init(&huart1);
+    if (HAL_UART_Init(&huart1) != HAL_OK) halt(BoardFault::Uart);
 }
 
 void i2cInit() {
@@ -145,7 +148,7 @@ void i2cInit() {
     hi2c1.Init.OwnAddress2 = 0;
     hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
     hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-    HAL_I2C_Init(&hi2c1);
+    if (HAL_I2C_Init(&hi2c1) != HAL_OK) halt(BoardFault::I2c);
 }
 
 constexpr uint32_t kPwmChannels[] = {TIM_CHANNEL_1, TIM_CHANNEL_2, TIM_CHANNEL_3, TIM_CHANNEL_4};
@@ -159,7 +162,7 @@ void pwmInit() {
     htim3.Init.Period = 4999;
     htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-    HAL_TIM_PWM_Init(&htim3);
+    if (HAL_TIM_PWM_Init(&htim3) != HAL_OK) halt(BoardFault::Pwm);
 
     TIM_OC_InitTypeDef oc = {};
     oc.OCMode = TIM_OCMODE_PWM1;
@@ -167,8 +170,8 @@ void pwmInit() {
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
     for (uint32_t ch : kPwmChannels) {
-        HAL_TIM_PWM_ConfigChannel(&htim3, &oc, ch);
-        HAL_TIM_PWM_Start(&htim3, ch);
+        if (HAL_TIM_PWM_ConfigChannel(&htim3, &oc, ch) != HAL_OK) halt(BoardFault::Pwm);
+        if (HAL_TIM_PWM_Start(&htim3, ch) != HAL_OK) halt(BoardFault::Pwm);
     }
 }
 
@@ -186,18 +189,23 @@ void adcInit() {
     hadc1.Init.NbrOfConversion = 1;
     hadc1.Init.DMAContinuousRequests = DISABLE;
     hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-    HAL_ADC_Init(&hadc1);
+    if (HAL_ADC_Init(&hadc1) != HAL_OK) halt(BoardFault::Adc);
 
     ADC_ChannelConfTypeDef c = {};
-    c.Channel = PIN_BAT_CHANNEL;
+    c.Channel = BAT_CHANNEL;
     c.Rank = 1;
     c.SamplingTime = ADC_SAMPLETIME_144CYCLES;  // a resistor divider is a high-impedance source
-    HAL_ADC_ConfigChannel(&hadc1, &c);
+    if (HAL_ADC_ConfigChannel(&hadc1, &c) != HAL_OK) halt(BoardFault::Adc);
 }
 
 // PWM was initialized with zero duty before this can happen, so the motors stay stopped.
-[[noreturn]] void halt() {
+[[noreturn]] void halt(BoardFault fault) {
+    gBoardFault = fault;
     __disable_irq();
+    if (htim3.Instance) {
+        htim3.Instance->CCR1 = htim3.Instance->CCR2 = 0;
+        htim3.Instance->CCR3 = htim3.Instance->CCR4 = 0;
+    }
     while (true) {}
 }
 
@@ -220,16 +228,16 @@ void encoderInit(TIM_HandleTypeDef* h, TIM_TypeDef* inst) {
     e.IC2Prescaler = TIM_ICPSC_DIV1;
     e.IC2Filter = 6;
     // Start without capture interrupts: the timer decodes both phases and
-    // updates CNT autonomously. TIM5 only samples CNT for wheel control.
-    if (HAL_TIM_Encoder_Init(h, &e) != HAL_OK) halt();
+    // updates CNT autonomously. TIM11 only samples CNT for wheel control.
+    if (HAL_TIM_Encoder_Init(h, &e) != HAL_OK) halt(BoardFault::Encoder);
     __HAL_TIM_SET_COUNTER(h, 0);
-    if (HAL_TIM_Encoder_Start(h, TIM_CHANNEL_ALL) != HAL_OK) halt();
+    if (HAL_TIM_Encoder_Start(h, TIM_CHANNEL_ALL) != HAL_OK) halt(BoardFault::Encoder);
 }
 
 }  // namespace
 
 void boardInit() {
-    HAL_Init();
+    if (HAL_Init() != HAL_OK) halt(BoardFault::Clock);
     clockConfig();
     gpioInit();
     uartInit();
@@ -256,17 +264,17 @@ void speedLoopStart() {
     htim11.Init.Period = kPeriod - 1;
     htim11.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     htim11.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-    HAL_TIM_Base_Init(&htim11);
+    if (HAL_TIM_Base_Init(&htim11) != HAL_OK) halt(BoardFault::ControlTimer);
     HAL_NVIC_SetPriority(TIM1_TRG_COM_TIM11_IRQn, 1, 0);
     HAL_NVIC_EnableIRQ(TIM1_TRG_COM_TIM11_IRQn);
-    HAL_TIM_Base_Start_IT(&htim11);
+    if (HAL_TIM_Base_Start_IT(&htim11) != HAL_OK) halt(BoardFault::ControlTimer);
 }
 
-void ledSet(bool on) { HAL_GPIO_WritePin(PIN_LED_PORT, PIN_LED_PIN, on ? GPIO_PIN_RESET : GPIO_PIN_SET); }
+void ledStatusSet(bool on) { HAL_GPIO_WritePin(LED_PORT, LED_PIN, on ? GPIO_PIN_RESET : GPIO_PIN_SET); }
 
-void led1Set(bool on) { HAL_GPIO_WritePin(PIN_L1_PORT, PIN_L1_PIN, on ? GPIO_PIN_SET : GPIO_PIN_RESET); }
+void led1Set(bool on) { HAL_GPIO_WritePin(L1_PORT, L1_PIN, on ? GPIO_PIN_SET : GPIO_PIN_RESET); }
 
-void led2Set(bool on) { HAL_GPIO_WritePin(PIN_L2_PORT, PIN_L2_PIN, on ? GPIO_PIN_SET : GPIO_PIN_RESET); }
+void led2Set(bool on) { HAL_GPIO_WritePin(L2_PORT, L2_PIN, on ? GPIO_PIN_SET : GPIO_PIN_RESET); }
 
 bool switchOn(int index) {
     static const uint16_t pins[3] = SW_PINS;
@@ -281,4 +289,5 @@ uint16_t batteryRaw() {
     return v;
 }
 
-bool buttonPressed() { return HAL_GPIO_ReadPin(PIN_BUTTON_PORT, PIN_BUTTON_PIN) == GPIO_PIN_RESET; }
+bool buttonPressed() { return HAL_GPIO_ReadPin(BUTTON_PORT, BUTTON_PIN) == GPIO_PIN_RESET; }
+bool button2Pressed() { return HAL_GPIO_ReadPin(BUTTON2_PORT, BUTTON2_PIN) == GPIO_PIN_RESET; }

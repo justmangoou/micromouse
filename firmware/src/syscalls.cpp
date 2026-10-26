@@ -1,16 +1,16 @@
 /**
  * @file    syscalls.cpp
- * @brief   Minimal newlib syscalls: printf goes out USART1, nothing else is supported.
+ * @brief   Minimal newlib syscalls: printf goes out USART1 as Log packets (remote.h), nothing else is supported.
  */
 #include <errno.h>
 #include <sys/stat.h>
 
-#include "board.h"
+#include "remote.h"
 
 extern "C" {
 
 int _write(int fd, char* buf, int len) {
-    HAL_UART_Transmit(&huart1, (uint8_t*)buf, (uint16_t)len, 100);
+    if (len > 0) remoteWrite(buf, (size_t)len);
     return len;
 }
 

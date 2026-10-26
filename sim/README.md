@@ -100,7 +100,7 @@ detections of the same random block created ghost duplicates that filled `MAX_EX
 the real one. Fixed by widening the merge threshold to 18 cm (safely under the 17 cm minimum spacing
 between genuinely different blocks, so it can't falsely merge two real obstacles) and the avoidance disc
 (`DISC_R`) from 8 to 11 cm, to buy back margin for the estimate's own imprecision. Both fixes are mirrored
-in `firmware/lib/nav` (same constants, same reasoning in the comments there).
+in `firmware/lib/course_nav` (same constants, same reasoning in the comments there).
 
 **Learned MLP (`course/policy.py`, `course/train.py`)** – 12→32→32→2 tanh network trained with antithetic evolution
 strategies (numpy only, parallel). Reward = official score deltas + a small progress term. Random block spot and sensor noise per episode. Its output is now a target-speed fraction (see above), so a checkpoint trained before

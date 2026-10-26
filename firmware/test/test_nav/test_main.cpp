@@ -4,6 +4,7 @@
  *          planner, and a closed-loop run. Run with `pio test -e native` from firmware/.
  */
 #include <unity.h>
+#include "../robot_fixture.h"
 
 #include <math.h>
 
@@ -26,7 +27,7 @@ using namespace nav;
 using namespace math;
 
 static nav::Planner gPlanner;  // ~60 KB, keep it off the stack
-static nav::Navigator gNav;
+static nav::Navigator gNav(cfg::TOF_LAYOUT);
 static nav::Path gPath;
 static const nav::NavParams kCar;  // the car the closed-loop test simulates: same vFull and track as the navigator's
 
@@ -106,10 +107,10 @@ void test_geometry() {
 }
 
 void test_odometry_straight_and_turn() {
-    FusedOdometry odo;
+    FusedOdometry odo(cfg::ODOM);
     odo.reset({0, 0, PI / 2});
     for (int i = 0; i < 30; i++) odo.update(56, 56, 0.0f, 1.0f / 30.0f);
-    float mm = 56 * 2.0f * PI * 16.0f / 420.0f * 30;
+    float mm = 56 * cfg::MM_PER_COUNT * 30;
     TEST_ASSERT_FLOAT_WITHIN(1.0f, mm, odo.pose.y);
     TEST_ASSERT_FLOAT_WITHIN(1.0f, 0.0f, odo.pose.x);
 
@@ -131,6 +132,41 @@ void test_pid_derivative_history() {
     TEST_ASSERT_FLOAT_WITHIN(1e-5f, -4, pid.update(1, 0, 0.5f));
     pid.reset();
     TEST_ASSERT_FLOAT_WITHIN(1e-5f, 2, pid.update(1, 0, 0.5f));
+}
+
+void test_gyro_bias_tracker() {
+    const float dt = 0.033f;
+    const nav::GyroBiasParams p = cfg::GYRO_BIAS;
+    nav::GyroBiasTracker tracker(p);
+    // Nothing until the robot has been still for stillS seconds.
+    int steps = 0;
+    while ((steps + 1) * dt < p.stillS) {
+        TEST_ASSERT_EQUAL_FLOAT(0.0f, tracker.update(0.01f, true, dt));
+        ++steps;
+    }
+    TEST_ASSERT_FLOAT_WITHIN(1e-7f, dt / p.timeConstantS * 0.01f, tracker.update(0.01f, true, dt));
+    // Converges on the residual offset: apply the corrections the way the firmware does.
+    float bias = 0.0f, trueBias = 0.02f;
+    for (int i = 0; i < 3000; ++i) bias += tracker.update(trueBias - bias, true, dt);
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, trueBias, bias);
+    // The correction per second does not depend on the step length.
+    nav::GyroBiasTracker fast(p), slow(p);
+    float fastSum = 0, slowSum = 0;
+    for (int i = 0; i < 400; ++i) fastSum += fast.update(0.01f, true, 0.01f);
+    for (int i = 0; i < 100; ++i) slowSum += slow.update(0.01f, true, 0.04f);
+    TEST_ASSERT_FLOAT_WITHIN(0.02f * slowSum, slowSum, fastSum);
+    // Motion, fast rotation, or a bad reading restarts the stillness requirement.
+    const int stillSteps = (int)(p.stillS / dt) + 2;
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, tracker.update(0.01f, false, dt));
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, tracker.update(0.01f, true, dt));
+    for (int i = 0; i < stillSteps; ++i) tracker.update(0.01f, true, dt);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, tracker.update(p.maxRate * 1.01f, true, dt));
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, tracker.update(0.01f, true, dt));
+    for (int i = 0; i < stillSteps; ++i) tracker.update(0.01f, true, dt);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, tracker.update(NAN, true, dt));
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, tracker.update(0.01f, true, dt));
+    for (int i = 0; i < stillSteps; ++i) tracker.update(0.01f, true, dt);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, tracker.update(0.01f, true, 0.0f));  // no time elapsed
 }
 
 void test_speed_controller() {
@@ -229,17 +265,17 @@ struct World {
     int n = 0;
 };
 
-void tofFromWorld(const Pose& p, const World& w, float out[tof::COUNT]) {
+void tofFromWorld(const Pose& p, const World& w, float out[cfg::TOF_COUNT]) {
     float c = cosf(p.th), s = sinf(p.th);
-    for (int k = 0; k < tof::COUNT; k++) {
-        Vec2 o = {p.x + c * tof::MOUNT_MM[k][0] - s * tof::MOUNT_MM[k][1], p.y + s * tof::MOUNT_MM[k][0] + c * tof::MOUNT_MM[k][1]};
-        float best = tof::MAX_MM;
-        for (int f = 0; f < tof::FOV_RAYS; f++) {
-            float a = p.th + tof::ANGLE[k] + tof::FOV[f];
+    for (int k = 0; k < cfg::TOF_COUNT; k++) {
+        Vec2 o = {p.x + c * cfg::TOF_LAYOUT.sensors[k].x - s * cfg::TOF_LAYOUT.sensors[k].y, p.y + s * cfg::TOF_LAYOUT.sensors[k].x + c * cfg::TOF_LAYOUT.sensors[k].y};
+        float best = cfg::TOF_MAX_MM;
+        for (int f = 0; f < cfg::TOF_LAYOUT.rayCount; f++) {
+            float a = p.th + cfg::TOF_LAYOUT.sensors[k].angle + cfg::TOF_LAYOUT.rays[f];
             Vec2 d = {cosf(a), sinf(a)};
-            for (int b = 0; b < w.n; b++) best = fminf(best, rayBlock(o, d, w.blocks[b], tof::MAX_MM));
+            for (int b = 0; b < w.n; b++) best = fminf(best, rayBlock(o, d, w.blocks[b], cfg::TOF_MAX_MM));
         }
-        out[k] = std::clamp(best, tof::MIN_MM, tof::MAX_MM);
+        out[k] = std::clamp(best, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM);
     }
 }
 
@@ -268,7 +304,7 @@ void test_closed_loop_with_unmapped_blocks() {
     world.blocks[world.n++] = Block(1700.0f, 950.0f, 0.3f);   // random block, top-right cell
     world.blocks[world.n++] = Block(1700.0f, 150.0f, -0.2f);  // random block, finish cell
 
-    gNav = Navigator();
+    gNav = Navigator(cfg::TOF_LAYOUT);
     gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
     Pose truth = {300.0f, -80.0f, PI / 2};
     gNav.start(truth, 0.0f);
@@ -279,7 +315,7 @@ void test_closed_loop_with_unmapped_blocks() {
     bool finished = false, hit = false;
     float t = 0, prevV = 0;
     for (; t < 60.0f && !finished; t += dt) {
-        float tof[tof::COUNT];
+        float tof[cfg::TOF_COUNT];
         tofFromWorld(truth, world, tof);
         float duty[2];
         gNav.step(truth, prevV, tof, t, duty);  // perfect localisation: this test is about planning and tracking
@@ -302,13 +338,13 @@ void test_closed_loop_with_unmapped_blocks() {
 
 // Ideal range rays against the maze perimeter and a wall blocking the first
 // north passage. Exercise gyro-heading turns and cell advancement together.
-static void mazeRanges(const math::Pose& pose, float ranges[tof::COUNT], int layout) {
-    for (int k = 0; k < tof::COUNT; ++k) {
+static void mazeRanges(const math::Pose& pose, float ranges[cfg::TOF_COUNT], int layout) {
+    for (int k = 0; k < cfg::TOF_COUNT; ++k) {
         float c = cosf(pose.th), s = sinf(pose.th);
-        float ox = pose.x + c * tof::MOUNT_MM[k][0] - s * tof::MOUNT_MM[k][1];
-        float oy = pose.y + s * tof::MOUNT_MM[k][0] + c * tof::MOUNT_MM[k][1];
-        float dx = cosf(pose.th + tof::ANGLE[k]), dy = sinf(pose.th + tof::ANGLE[k]);
-        float r = tof::MAX_MM;
+        float ox = pose.x + c * cfg::TOF_LAYOUT.sensors[k].x - s * cfg::TOF_LAYOUT.sensors[k].y;
+        float oy = pose.y + s * cfg::TOF_LAYOUT.sensors[k].x + c * cfg::TOF_LAYOUT.sensors[k].y;
+        float dx = cosf(pose.th + cfg::TOF_LAYOUT.sensors[k].angle), dy = sinf(pose.th + cfg::TOF_LAYOUT.sensors[k].angle);
+        float r = cfg::TOF_MAX_MM;
         for (float x : {0.0f, 540.0f, 180.0f}) {
             if (x == 180 && layout != 2) continue;
             if (fabsf(dx) < 1e-6f) continue;
@@ -322,23 +358,23 @@ static void mazeRanges(const math::Pose& pose, float ranges[tof::COUNT], int lay
             float end = (y == 180 || y == 360) ? 180 : 540;
             if (t >= 0 && x >= 0 && x <= end) r = fminf(r, t);
         }
-        ranges[k] = fmaxf(tof::MIN_MM, r);
+        ranges[k] = fmaxf(cfg::TOF_MIN_MM, r);
     }
 }
 
 void test_micromouse_closed_loop() {
     for (int layout : {0, 1, 2}) { // open, blocked entry, dead end requiring a 180-degree turn
-        nav::MicromouseParams p;
+        nav::MicromouseParams p = robotMazeParams();
         p.width = p.height = 3;
-        nav::Micromouse mouse(p);
+        nav::Micromouse mouse(cfg::TOF_LAYOUT, p);
         TEST_ASSERT_TRUE(mouse.start(0));
         math::Pose pose = mouse.startPose();
         float actual[2] = {0, 0};
-        bool reliable[tof::COUNT] = {true, true, true, true};
+        bool reliable[cfg::TOF_COUNT] = {true, true, true, true};
         const float dt = 0.033f;
         bool turned = false, backtracked = false;
         for (float t = 0; t < 30; t += dt) {
-            float ranges[tof::COUNT], command[2];
+            float ranges[cfg::TOF_COUNT], command[2];
             mazeRanges(pose, ranges, layout);
             mouse.step(pose, ranges, reliable, t, command);
             turned |= mouse.state() == nav::Micromouse::State::Turning;
@@ -371,10 +407,10 @@ void test_micromouse_closed_loop() {
 }
 
 void test_micromouse_faults_stop_commands() {
-    nav::Micromouse mouse;
+    nav::Micromouse mouse(cfg::TOF_LAYOUT, robotMazeParams());
     TEST_ASSERT_TRUE(mouse.start(0));
-    float ranges[tof::COUNT] = {300, 300, 300, 300}, command[2];
-    bool reliable[tof::COUNT] = {true, true, true, true};
+    float ranges[cfg::TOF_COUNT] = {300, 300, 300, 300}, command[2];
+    bool reliable[cfg::TOF_COUNT] = {true, true, true, true};
     math::Pose pose = mouse.startPose();
     mouse.step(pose, ranges, reliable, 0, command); // verified open, starts advance
     TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Advancing), static_cast<int>(mouse.state()));
@@ -400,14 +436,14 @@ void test_micromouse_faults_stop_commands() {
 
     mouse.start(0);
     mouse.step(pose, ranges, reliable, 0, command);
-    ranges[1] = ranges[2] = tof::MIN_MM; // unexpected obstacle during advance
+    ranges[1] = ranges[2] = cfg::TOF_MIN_MM; // unexpected obstacle during advance
     mouse.step(pose, ranges, reliable, 0.033f, command);
     TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
     TEST_ASSERT_EQUAL_FLOAT(0, command[0]);
     TEST_ASSERT_EQUAL_FLOAT(0, command[1]);
 
     mouse.start(0);
-    ranges[1] = ranges[2] = tof::MAX_MM; // no-target is not evidence of open space
+    ranges[1] = ranges[2] = cfg::TOF_MAX_MM; // no-target is not evidence of open space
     mouse.step(pose, ranges, reliable, 0, command);
     TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Passage::Unknown),
                           static_cast<int>(mouse.maze().passage({0, 0}, nav::Direction::North)));
@@ -420,6 +456,7 @@ int main() {
     RUN_TEST(test_floodfill_wall_updates_and_known_routes);
     RUN_TEST(test_geometry);
     RUN_TEST(test_odometry_straight_and_turn);
+    RUN_TEST(test_gyro_bias_tracker);
     RUN_TEST(test_speed_controller);
     RUN_TEST(test_speed_controller_deadband);
     RUN_TEST(test_pid_derivative_history);

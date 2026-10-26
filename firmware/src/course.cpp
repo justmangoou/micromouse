@@ -3,7 +3,7 @@
  * @brief   Block-course mode (env:obstacle_avoidance): plan with A* on the stored map, follow the path, replan around
  *          blocks the map does not have, stop over the finish line.
  */
-#include <stdio.h>
+#include <cmath>
 
 #include "board.h"
 #include "config.h"
@@ -31,80 +31,81 @@ nav::NavParams navParams() {
     return p;
 }
 
-nav::Navigator gNav(navParams());  // ~65 KB of planner arrays, static on purpose
+nav::Navigator gNav(cfg::TOF_LAYOUT, navParams());  // ~36 KB of planner arrays, static on purpose
 
 bool atFinish(const math::Pose& p) {
     return p.y < FINISH_Y && p.x > FINISH_X_MIN && p.x < FINISH_X_MAX && gNav.progress() > FINISH_MIN_PROGRESS;
 }
 
-// One CSV line per step: time (ms), x, y (mm), heading (mrad), speed (mm/s), left and right duty (%), ToF (mm).
-void logStep(uint32_t ms, const nav::FusedOdometry& odo, const float duty[2], const float tof[TOF_COUNT]) {
-    printf("%lu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", (unsigned long)ms, (int)(odo.pose.x), (int)(odo.pose.y),
-           (int)(odo.pose.th * 1000), (int)(odo.v), (int)(duty[0] * 100), (int)(duty[1] * 100), (int)(tof[0]),
-           (int)(tof[1]), (int)(tof[2]), (int)(tof[3]));
-}
-
 }  // namespace
 
-void runMode(const StartupStatus& status) {
-    enum class State { Ready, Running, Done };
-
-    printf("block course: %d map blocks\r\n", MAP_BLOCK_COUNT);
+void runMode(const StartupStatus&) {
+    using namespace reliability;
     gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
-    nav::FusedOdometry odo(odometryParams());
+    nav::FusedOdometry odo(cfg::ODOM);
     odo.reset({START_X, START_Y, START_TH});
-
-    if (status.calibrated) {
-        uint32_t t0 = HAL_GetTick();
-        gNav.start(odo.pose, 0.0f);
-        printf("planned %d points, %d replans, %lu ms\r\n", gNav.path().n, gNav.replans(),
-               (unsigned long)(HAL_GetTick() - t0));
-    }
-
-    State state = status.calibrated ? State::Ready : State::Done;
+    Supervisor supervisor;
+    if (!gNav.configurationValid()) supervisor.latch(Fault::Configuration);
+    bool planned = false;
+    bool routeReady = false;
+    uint32_t lastPlan = HAL_GetTick() - RETRY_MS;
     unsigned pressed = 0;
-    uint32_t runStart = 0;
-    float gyro = 0;  // last good yaw rate, held through a step without a gyro sample
     SensorStep s;
 
     while (true) {
         waitStep(s);
-        if (s.gyroSamples > 0) gyro = s.gyro;
-        float dt = s.dt < 0.005f ? cfg::CONTROL_PERIOD_MS * 0.001f : s.dt;
-        odo.update(s.countsL, s.countsR, gyro, dt);
+        float target[2] = {};  // wheel targets this step, mm/s
+        RemoteCommands remote = pollRemote();
+        State before = supervisor.state();
+        if (before != State::Done && before != State::Fault && !updateOdometry(odo, s)) supervisor.latch(Fault::Pose);
+        Fault issue = sensorIssue(s, (1u << TOF_COUNT) - 1, !supervisor.started());
+        if (before == State::Running && !motorsEnabled()) issue = Fault::CommandExpired;
+        if (issue != Fault::None) routeReady = false;
+        if (issue == Fault::None && (!routeReady || !gNav.hasRoute())) issue = Fault::NoRoute;
+        pressed = buttonPressed() ? pressed + 1 : 0;
+        supervisor.update(s.completedAt, issue, s.countsL == 0 && s.countsR == 0, pressed >= 3 || remote.start);
+        if (supervisor.state() != State::Fault && supervisor.started() && (s.completedAt - supervisor.startedAt()) * 0.001f > cfg::RUN_TIME_LIMIT_S)
+            supervisor.done();
+        if (remote.stop) supervisor.done();
 
-        switch (state) {
-            case State::Ready:
-                ledSet((s.now / 500) % 2 == 0);
-                pressed = buttonPressed() ? pressed + 1 : 0;
-                if (pressed >= 3) {
-                    runStart = s.now;
-                    motorEnable(true);
-                    printf("run\r\n");
-                    state = State::Running;
-                }
-                break;
-
-            case State::Running: {
-                float t = (s.now - runStart) * 0.001f;
-                float duty[2];
-                gNav.step(odo.pose, odo.v, s.tof, t, duty);
-                motorSetTargets(duty[0] * cfg::V_FULL_MM_S, duty[1] * cfg::V_FULL_MM_S);
-                ledSet(true);
-                logStep(s.now - runStart, odo, duty, s.tof);
-
-                if (atFinish(odo.pose) || t > cfg::RUN_TIME_LIMIT_S) {
-                    motorEnable(false);
-                    printf("done at %d ms, %d unmapped blocks, %d replans\r\n", (int)(t * 1000), gNav.unmappedBlocks(),
-                           gNav.replans());
-                    state = State::Done;
-                }
-                break;
+        if (supervisor.state() != State::Running) motorEnable(false);
+        if (supervisor.state() == State::Recovering) {
+            if (recoverSensors(s)) {
+                supervisor.update(HAL_GetTick(), Fault::Sensor, false, false);
+            } else if (sensorIssue(s, (1u << TOF_COUNT) - 1, !supervisor.started()) == Fault::None && !routeReady &&
+                       s.completedAt - lastPlan >= RETRY_MS) {
+                lastPlan = s.completedAt;
+                ++gRuntime.recoveryAttempts;
+                float planTime = supervisor.started() ? (s.completedAt - supervisor.startedAt()) * 0.001f : 0;
+                if (!planned) { routeReady = gNav.start(odo.pose, planTime); planned = true; }
+                else routeReady = gNav.reposition(odo.pose, planTime);
             }
-
-            case State::Done:
-                ledSet(false);
-                break;
+        } else if (supervisor.state() == State::Running) {
+            if (before != State::Running) motorEnable(true);
+            float t = (s.completedAt - supervisor.startedAt()) * 0.001f;
+            float duty[2] = {};
+            gNav.step(odo.pose, odo.v, s.tof, t, duty);
+            Fault after = sensorIssue(s, (1u << TOF_COUNT) - 1, !supervisor.started());
+            if (!gNav.hasRoute()) after = Fault::NoRoute;
+            if (!motorsEnabled()) after = Fault::CommandExpired;
+            if (!std::isfinite(duty[0]) || !std::isfinite(duty[1])) {
+                supervisor.latch(Fault::Configuration);
+                motorEnable(false);
+            } else if (after != Fault::None) {
+                motorEnable(false);
+                routeReady = false;
+                supervisor.update(HAL_GetTick(), after, false, false);
+            } else if (atFinish(odo.pose)) {
+                motorEnable(false);
+                supervisor.done();
+            } else {
+                target[0] = duty[0] * cfg::V_FULL_MM_S;
+                target[1] = duty[1] * cfg::V_FULL_MM_S;
+                motorSetTargets(target[0], target[1]);
+            }
         }
+        ledStatusSet(supervisor.state() == State::Running ||
+                     (supervisor.state() == State::Ready && (s.completedAt / 500) % 2 == 0));
+        reportRuntime(supervisor, s, odo, target);
     }
 }

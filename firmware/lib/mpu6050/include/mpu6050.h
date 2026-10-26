@@ -14,6 +14,7 @@ public:
     explicit Mpu6050(I2cBus& bus, uint8_t addr7 = 0x68) : bus_(bus), addr7_(addr7) {}
 
     // Reset, wake, 42 Hz low-pass, 200 Hz sample rate, +-500 deg/s. False if the chip does not answer.
+    // Preserves the previous calibrated bias when reinitializing after an outage.
     bool init();
 
     // Blocking calibration: keep the robot stationary for the entire sample window.
@@ -21,6 +22,8 @@ public:
     // apart to match the configured 200 Hz sample rate. Call after init().
     bool calibrateGyroZ(uint16_t samples = 400, uint32_t samplePeriodMs = 5);
     float gyroBiasZ() const { return gyroBiasZ_; }  // sensor-frame rad/s
+    // Nudge the offset while the robot stands still (see nav::GyroBiasTracker).
+    void adjustGyroBiasZ(float delta) { gyroBiasZ_ += delta; }
 
     // Offset-corrected yaw rate in rad/s, positive = counter-clockwise for a chip mounted flat, top up. Flip the sign in the caller
     // if your mounting differs. Empty if the I2C read failed.

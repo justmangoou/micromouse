@@ -2,3 +2,4 @@
 numpy==2.5.3
 matplotlib==3.11.2
 pillow==12.3.0  # matplotlib needs it for the GIF writer
+pyserial==3.5  # firmware/tools/console.py

@@ -37,7 +37,7 @@ VL53L0X mounting (body frame, x forward, y left, cm), angle from heading, CCW po
 | 4 | +60° (left edge) | 6.0 | +4.5 |
 
 Measure the real positions and angles with a ruler and protractor. The firmware defines the layout once, in
-`firmware/lib/nav/include/tof_layout.h`; put the numbers there, and in `TOF_MOUNT` / `TOF_ANGLES` in `sim/config.py`, then run
+`firmware/include/config.h`; put the numbers there, and in `TOF_MOUNT` / `TOF_ANGLES` in `sim/config.py`, then run
 `python -m sim.tools.check_firmware` to confirm the two agree.
 A 1° error is enough to shift the map-matching correction.
 
@@ -79,40 +79,44 @@ firmware/
               course.cpp   block-course mode: start pose, finish line, A* navigator (env:obstacle_avoidance)
               maze.cpp     maze mode: maze tuning, flood-fill explorer (env:micromouse)
               board.cpp (clock, GPIO, UART, I2C, ADC, PWM, encoder timers, speed loop timer), motor.cpp (motors and the
-              wheel speed loop), tof_array.cpp (4x VL53L0X), interrupts.cpp, syscalls.cpp
+              wheel speed loop), tof_array.cpp (4x VL53L0X), remote.cpp (comms packets over USART1),
+              interrupts.cpp, syscalls.cpp
   lib/        each library has its own include/ and src/
-    math/       pi, angle wrap, Vec2, Pose; clamping is std::clamp
-    control/    PID, wheel speed controller (feed-forward + PID), speed estimator: pure logic, host-tested
-    nav/        odometry, ToF layout, arena geometry, A* planner and navigator, flood fill and maze explorer: no HAL
+    base/       math, odometry, PID and wheel speed control, reliability, ToF layout: pure logic, host-tested
+    comms/      packet protocol for the HC-05 link (telemetry, logs, start/stop): pure logic, host-tested
+    course_nav/ arena geometry, A* planner and navigator (block course)
+    micromouse/ flood fill and maze explorer
     i2c_bus/    shared register read/write helpers over the HAL I2C
     mpu6050/    gyro-z driver, uses an I2cBus
     vl53l0x_api/ ST VL53L0X API, portable core only (see its README)
     vl53l0x_impl/ the API's I2C functions implemented on I2cBus
-    hc05/       HC-05 Bluetooth UART helper
   test/       host unit tests
+  tools/      console.py: host console for the comms link
 ```
 
 ```
 pio run -e micromouse -t upload          # maze mode (the default environment), flash over ST-Link
 pio run -e obstacle_avoidance -t upload  # block-course mode
-pio device monitor                       # 460800 baud telemetry on USART1
+python tools/console.py PORT --baud 9600    # telemetry, logs, start/stop over USART1 (wired or HC-05)
 pio test -e native                       # host tests of lib/, no hardware needed
 python -m sim.course.export_map          # regenerate include/map_data.h and the test reference from the sim
 ```
 
 **What it does.** Both modes start the same way (`main.cpp`): sensors up, then ~2 s of gyro bias calibration with the
-robot standing still. Then the mode waits for the KEY button and runs at 30 Hz (4 ToF readings, fused odometry,
+robot standing still. Then the mode waits for the KEY button (or `start` from the console) and runs at 30 Hz (4 ToF readings, fused odometry,
 navigation) while a 200 Hz timer interrupt (TIM11) closes the wheel speed loop; the encoders are decoded by hardware.
-The block-course mode plans on the stored map (`include/map_data.h`) and stops over the finish line, logging one CSV
-line per step: time (ms), x, y (mm), heading (mrad), speed (mm/s), left and right duty (%), then the four ToF
-distances (mm). The maze mode explores from the southwest cell, facing north, until it reaches a centre cell.
+The block-course mode plans on the stored map (`include/map_data.h`) and stops over the finish line. Both modes send
+telemetry at 10 Hz: pose, speed, wheel targets, the four ToF distances, state and fault (`lib/comms/README.md`);
+`tools/console.py --csv` records it. `stop` from the console ends a run. `pio run -e manual` builds a third mode where
+`drive L R` in the console sets the wheel speeds (mm/s) with a 300 ms dead-man timeout. The maze mode explores from the southwest cell, facing north, until it reaches a centre cell.
 
 **Implemented and checked.**
-- Builds clean for the F411. Block course: about 43 KB flash (8 %) and 80 KB RAM (61 %, the planner's static arrays
-  are ~60 KB). Maze: about 38 KB flash and 5 KB RAM. The ELF is hard-float (VFPv4-D16).
-- `lib/nav` is a port of the sim's odometry, A* planner and navigator, plus the flood-fill maze explorer; `lib/math`
-  and `lib/control` hold their shared types, the PID and the speed estimate. `pio test -e native` passes 11 tests:
-  flood fill, geometry, odometry, the wheel speed controller and estimator, the planner against the Python planner's
+- Builds clean for the F411. Block course: about 47 KB flash (9 %) and 50 KB RAM (38 %, the planner's static arrays
+  are ~36 KB). Maze: about 42 KB flash and 7 KB RAM. The ELF is hard-float (VFPv4-D16).
+- `lib/course_nav` owns the course A* planner and navigator; `lib/micromouse` owns maze exploration.
+  `lib/base` holds the hardware-independent shared code: math types, odometry, the PID and speed estimate,
+  reliability supervision, and the generic ToF layout. `pio test -e native` passes 44 tests:
+  comms framing and telemetry, flood fill, geometry, odometry, the wheel speed controller and estimator, the planner against the Python planner's
   path length on the same map, a closed-loop course run with two unmapped blocks, and closed-loop maze runs with fault
   checks.
 
@@ -141,7 +145,7 @@ Do these in order and write down the numbers. Each one fills in a constant in `s
 
 1. **Flash and log.** Build and upload with `pio run -t upload` from `firmware/` over SWD with an ST-Link. If you have
    no probe, the F411 has a built-in USB DFU bootloader (hold BOOT0, reset, then upload with `upload_protocol = dfu`). Confirm the
-   serial output with `pio device monitor`.
+   serial output with `python tools/console.py PORT` (the `tof_test` build prints plain text for `pio device monitor`).
 2. **Motors.** Wheels off the ground. Check direction for + and − duty and the PWM frequency (above audible, ~20 kHz).
    Sweep duty from 0 up and find the duty where each wheel starts to turn (the **deadband**; the sim uses 0.06).
 3. **Encoders.** Turn each wheel by hand exactly 10 revolutions and read the counts. Counts / 10 = counts per rev
@@ -166,7 +170,9 @@ Do these in order and write down the numbers. Each one fills in a constant in `s
    compensation.
 8. **Odometry tests**, on the real floor:
    - 2 m straight: measure the end offset.
-   - Spin in place 10 turns: gives the gyro scale and the track width.
+   - Spin in place 10 turns: gives the gyro scale (`GYRO_SCALE` in `config.h`: 3600 divided by the degrees the
+     odometry reported) and the track width. The gyro offset is re-estimated whenever the robot stands still with the
+     motors off, so warm-up drift while waiting for the button does not accumulate.
    - A 50 cm square driven 5 times each way (UMBmark): separates a wheel-radius error from a track error.
 9. **Closed loop.** Run a recorded line from the start jig and measure the final error against the finish mark.
 
@@ -181,7 +187,7 @@ pose error with what you measured.
 | `CPR` | step 3 |
 | `OMEGA_MAX`, `MOTOR_TAU`, `MOTOR_DEADBAND` | steps 2 and 6 |
 | `GYRO_NOISE`, `GYRO_BIAS_SIGMA`, `GYRO_BIAS_WALK` | step 4 |
-| `TOF_MOUNT`, `TOF_ANGLES`, `TOF_MIN/MAX` (also `tof_layout.h` in the firmware), noise in `robot.py` | steps 1 and 5 |
+| `TOF_MOUNT`, `TOF_ANGLES`, `TOF_MIN/MAX` (also `config.h` in the firmware), noise in `robot.py` | steps 1 and 5 |
 | `ACCEL_SLIP_*`, `SLIP_WALK` | compare wheel odometry against a tape-measure ground truth over several runs |
 | `START_SIGMA` | repeat start-jig placements and measure the spread |
 

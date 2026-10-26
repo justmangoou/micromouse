@@ -3,7 +3,7 @@
     python -m sim.tools.check_firmware
 
 The sim keeps its own layout in sim/config.py (it can run other sensor layouts for experiments); the firmware defines each
-value once (lib/nav/include/tof_layout.h, include/config.h, src/course.cpp; NavParams' defaults in navigator.h, which
+value once (include/config.h, src/course.cpp; NavParams' defaults in navigator.h, which
 the host tests use). Firmware uses mm; the simulator uses cm.
 Convert at this comparison boundary. Exit status 1 if any differ.
 """
@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from .. import config as C
+from ..robot import FusedOdometry
 
 FW = Path(__file__).resolve().parents[2] / "firmware"
 
@@ -37,18 +38,19 @@ def scalar(src, name):
 
 
 def main():
-    tof = (FW / "lib/nav/include/tof_layout.h").read_text()
     cfg = (FW / "include/config.h").read_text()
-    nav = (FW / "lib/nav/include/navigator.h").read_text()
+    nav = (FW / "lib/course_nav/include/navigator.h").read_text()
     course = (FW / "src/course.cpp").read_text()
     checks = [
-        ("tof angles (deg)", array(tof, "ANGLE_DEG"), np.degrees(C.TOF_ANGLES), 1e-3),
-        ("tof mount (mm)", array(tof, "MOUNT_MM").reshape(-1, 2), C.TOF_MOUNT * 10, 1e-2),
-        ("tof cone rays (deg)", array(tof, "FOV_DEG"), np.degrees(C.TOF_FOV), 1e-3),
-        ("tof range (mm)", np.array([scalar(tof, "MIN_MM"), scalar(tof, "MAX_MM")]), np.array([C.TOF_MIN, C.TOF_MAX]) * 10, 1e-2),
+        ("tof angles (deg)", array(cfg, "TOF_ANGLE_DEG"), np.degrees(C.TOF_ANGLES), 1e-3),
+        ("tof mount (mm)", array(cfg, "TOF_MOUNT_MM").reshape(-1, 2), C.TOF_MOUNT * 10, 1e-2),
+        ("tof cone rays (deg)", array(cfg, "TOF_FOV_DEG"), np.degrees(C.TOF_FOV), 1e-3),
+        ("tof range (mm)", np.array([scalar(cfg, "TOF_MIN_MM"), scalar(cfg, "TOF_MAX_MM")]), np.array([C.TOF_MIN, C.TOF_MAX]) * 10, 1e-2),
         ("wheel radius", scalar(cfg, "WHEEL_RADIUS_MM"), C.WHEEL_R * 10, 1e-2),
         ("wheel track", scalar(cfg, "WHEEL_TRACK_MM"), C.TRACK * 10, 1e-2),
         ("counts per rev", scalar(cfg, "COUNTS_PER_REV"), C.CPR, 1e-3),
+        ("odometry gyro weight", scalar(cfg, "ODOM_GYRO_WEIGHT"), FusedOdometry.ALPHA, 1e-6),
+        ("odometry slip rate", scalar(cfg, "ODOM_SLIP_RATE_RAD_S"), FusedOdometry.SLIP_RATE, 1e-6),
         ("V_FULL (config.h)", scalar(cfg, "V_FULL_MM_S"), C.V_FULL * 10, 1.0),
         ("V_FULL (NavParams default)", scalar(nav, "vFull"), C.V_FULL * 10, 1.0),
         ("wheel track (NavParams default)", scalar(nav, "track"), C.TRACK * 10, 1e-2),

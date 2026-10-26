@@ -42,7 +42,12 @@ private:
 // TIM2/TIM4 count encoder pulses in hardware. motorTick() runs the speed
 // estimate and PID at cfg::SPEED_LOOP_HZ; odometry reads counters separately.
 void motorInit();
+// Enabling starts a 150 ms command lease. Disabling clears both controllers.
 void motorEnable(bool on);
+// Publish both targets and refresh the lease atomically; ignored while disabled.
 void motorSetTargets(float vLeft, float vRight);  // mm/s, forward positive
 void motorTick();                                  // once per speed loop period (interrupt context)
 void motorTakeCounts(int32_t* left, int32_t* right);  // counts since the last call, from the hardware counters
+
+uint32_t motorCommandExpiries();
+bool motorsEnabled();

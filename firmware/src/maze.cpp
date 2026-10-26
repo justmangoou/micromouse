@@ -4,6 +4,7 @@
  *          Start at the southwest cell centre, facing north.
  */
 #include <stdio.h>
+#include <cmath>
 
 #include "board.h"
 #include "config.h"
@@ -13,11 +14,11 @@
 
 namespace {
 
-constexpr uint32_t TOF_MAX_AGE_MS = 150;  // an older range is not evidence of anything
-
 // Maze tuning. Measure the cell size for your maze.
 nav::MicromouseParams mazeParams() {
     nav::MicromouseParams p;
+    p.leftSensor = cfg::TOF_LEFT_MIDDLE;
+    p.rightSensor = cfg::TOF_RIGHT_MIDDLE;
     p.width = 16;
     p.height = 16;
     p.cellSize = 180.0f;            // mm
@@ -40,56 +41,63 @@ nav::MicromouseParams mazeParams() {
     return p;
 }
 
-nav::Micromouse gMouse(mazeParams());
+nav::Micromouse gMouse(cfg::TOF_LAYOUT, mazeParams());
 
 }  // namespace
 
-void runMode(const StartupStatus& status) {
-    bool ready = status.calibrated && status.tofUp == TOF_COUNT;
-    printf("maze %s: place at the southwest cell centre facing north\r\n", ready ? "ready" : "NOT READY");
-
-    nav::FusedOdometry odo(odometryParams());
+void runMode(const StartupStatus&) {
+    using namespace reliability;
+    constexpr unsigned required = (1u << cfg::TOF_RIGHT_MIDDLE) | (1u << cfg::TOF_LEFT_MIDDLE);
+    nav::FusedOdometry odo(cfg::ODOM);
     odo.reset(gMouse.startPose());
-    bool running = false;
+    Supervisor supervisor;
+    bool mouseStarted = false;
     unsigned pressed = 0;
-    uint32_t runStart = 0;
     SensorStep s;
 
     while (true) {
         waitStep(s);
-        bool reliable[TOF_COUNT];
-        for (int k = 0; k < TOF_COUNT; ++k) reliable[k] = tofReliable(k, TOF_MAX_AGE_MS);
+        float target[2] = {};  // wheel targets this step, mm/s
+        RemoteCommands remote = pollRemote();
+        State before = supervisor.state();
+        if (before != State::Done && before != State::Fault && !updateOdometry(odo, s)) supervisor.latch(Fault::Pose);
+        Fault issue = sensorIssue(s, required, !supervisor.started());
+        if (before == State::Running && !motorsEnabled()) issue = Fault::CommandExpired;
+        pressed = buttonPressed() ? pressed + 1 : 0;
+        supervisor.update(s.completedAt, issue, s.countsL == 0 && s.countsR == 0, pressed >= 3 || remote.start);
+        float t = supervisor.started() ? (s.completedAt - supervisor.startedAt()) * 0.001f : 0;
+        if (supervisor.state() != State::Fault && supervisor.started() && t > cfg::RUN_TIME_LIMIT_S) supervisor.done();
+        if (remote.stop) supervisor.done();
 
-        if (running) {
-            if (s.gyroSamples == 0 || s.dt <= 0 || s.dt > TOF_MAX_AGE_MS * 0.001f) {
-                gMouse.stop();
-            } else {
-                odo.update(s.countsL, s.countsR, s.gyro, s.dt);
-            }
-            float target[2];
-            gMouse.step(odo.pose, s.tof, reliable, (s.now - runStart) * 0.001f, target);
-            motorSetTargets(target[0], target[1]);
-
-            auto state = gMouse.state();
-            if (state == nav::Micromouse::State::Done || state == nav::Micromouse::State::Fault) {
-                motorEnable(false);
-                running = ready = false;
-                nav::Cell cell = gMouse.cell();
-                printf("maze %s at %d,%d\r\n", state == nav::Micromouse::State::Done ? "goal" : "FAULT", cell.x, cell.y);
-            }
-            ledSet(running);
-        } else if (ready) {
-            ledSet((s.now / 500) % 2 == 0);
-            pressed = buttonPressed() ? pressed + 1 : 0;
-            if (pressed >= 3 && s.gyroSamples > 0 && reliable[tof::RIGHT_MIDDLE] && reliable[tof::LEFT_MIDDLE]) {
-                odo.reset(gMouse.startPose());  // start from the cell pose only once the button is pressed
-                runStart = s.now;
-                running = ready = gMouse.start(0.0f);
-                motorEnable(running);
-                printf("maze %s\r\n", running ? "run" : "invalid configuration");
-            }
-        } else {
-            ledSet(false);
+        if (supervisor.state() != State::Running) {
+            motorEnable(false);
+            if (mouseStarted) gMouse.pause(t);
         }
+        if (supervisor.state() == State::Recovering) {
+            if (recoverSensors(s)) supervisor.update(HAL_GetTick(), Fault::Sensor, false, false);
+        } else if (supervisor.state() == State::Running) {
+            if (before != State::Running) {
+                if (!mouseStarted) odo.reset(gMouse.startPose());
+                bool ok = mouseStarted ? gMouse.resume(t) : gMouse.start(t);
+                if (!ok) supervisor.latch(Fault::Configuration);
+                else { mouseStarted = true; motorEnable(true); }
+            }
+            if (supervisor.state() == State::Running) {
+                bool reliable[TOF_COUNT];
+                for (int i = 0; i < TOF_COUNT; ++i) reliable[i] = s.ranges[i].status == RangeStatus::Valid;
+                gMouse.step(odo.pose, s.tof, reliable, t, target);
+                if (!std::isfinite(target[0]) || !std::isfinite(target[1])) supervisor.latch(Fault::Configuration);
+                else if (gMouse.state() == nav::Micromouse::State::Done) supervisor.done();
+                else if (gMouse.state() == nav::Micromouse::State::Fault) supervisor.latch(Fault::Pose);
+                if (supervisor.state() == State::Running) motorSetTargets(target[0], target[1]);
+                else {
+                    motorEnable(false);
+                    target[0] = target[1] = 0;
+                }
+            }
+        }
+        ledStatusSet(supervisor.state() == State::Running ||
+                     (supervisor.state() == State::Ready && (s.completedAt / 500) % 2 == 0));
+        reportRuntime(supervisor, s, odo, target);
     }
 }

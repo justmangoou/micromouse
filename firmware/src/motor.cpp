@@ -8,6 +8,8 @@
 #include "board.h"
 #include "config.h"
 #include "speed_controller.h"
+#include "reliability.h"
+#include <cmath>
 
 void Motor::setDuty(float u) {
     u *= motorSign_;
@@ -72,6 +74,10 @@ int32_t Motor::takeCounts() {
 
 namespace {
 
+reliability::CommandLease gLease;
+volatile uint32_t gExpiries = 0;
+volatile bool gEnabled = false;
+
 speed_control::SpeedController makeController() {
     return speed_control::SpeedController(
         cfg::V_FULL_MM_S, cfg::MM_PER_COUNT, cfg::SPEED_LOOP_DT_S,
@@ -90,19 +96,44 @@ void motorInit() {
 }
 
 void motorEnable(bool on) {
+    const uint32_t irqState = __get_PRIMASK();
+    __disable_irq();
+    gEnabled = on;
     gLeft.enable(on);
     gRight.enable(on);
+    if (on) gLease.publish(HAL_GetTick());
+    else gLease.clear();
+    __set_PRIMASK(irqState);
 }
 
 void motorSetTargets(float vLeft, float vRight) {
-    gLeft.setTarget(vLeft);
-    gRight.setTarget(vRight);
+    const uint32_t irqState = __get_PRIMASK();
+    __disable_irq();
+    const uint32_t now = HAL_GetTick();
+    if (gEnabled && gLease.expired(now)) {
+        motorEnable(false);
+        ++gExpiries;
+    } else if (!std::isfinite(vLeft) || !std::isfinite(vRight)) {
+        motorEnable(false);
+    } else if (gEnabled) {
+        gLeft.setTarget(vLeft);
+        gRight.setTarget(vRight);
+        gLease.publish(now);
+    }
+    __set_PRIMASK(irqState);
 }
 
 void motorTick() {
+    if (gEnabled && gLease.expired(HAL_GetTick())) {
+        motorEnable(false);
+        ++gExpiries;
+    }
     gLeft.tick();
     gRight.tick();
 }
+
+uint32_t motorCommandExpiries() { return gExpiries; }
+bool motorsEnabled() { return gEnabled; }
 
 void motorTakeCounts(int32_t* left, int32_t* right) {
     *left = gLeft.takeCounts();
