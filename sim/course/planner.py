@@ -67,7 +67,7 @@ class AStarDriver:
         self.env = env
         self.map_c, self.map_a = env.loc.map_centers, env.loc.map_angles
         self.static_clear = block_clearance(CELL_PTS, self.map_c, self.map_a)
-        self.spot_clear = block_clearance(CELL_PTS, C.RANDOM_SPOTS, np.zeros(len(C.RANDOM_SPOTS)))
+        self.spot_clear = np.full(len(CELL_PTS), np.inf)  # the random block can be anywhere: no soft spots
         self.extra = []  # [centre, n_hits] of blocks the ToF saw but the map does not have
         self.streak = np.zeros(len(C.TOF_ANGLES), int)
         self.n_repos = env.n_repos
@@ -98,7 +98,6 @@ class AStarDriver:
             clear = np.minimum(clear, np.hypot(CELL_PTS[:, 0] - c[0], CELL_PTS[:, 1] - c[1]) - DISC_R)
         free = ((clear >= radius) & TRACK_OK[edge]).reshape(len(YS), len(XS))
         # prefer the middle of a gap: crowding a block or the tape both cost extra
-        # (the 4 spots a random block can appear on are soft obstacles too: avoid them when there is room)
         room = np.minimum(np.minimum(clear, EDGE_DIST + (R_ROBOT - R_EDGE)), self.spot_clear)
         mult = (1.0 + self.centering * np.clip((16.0 - room) / 16.0, 0, 1) ** 2).reshape(free.shape)
         free_l, mult_l = free.tolist(), mult.tolist()

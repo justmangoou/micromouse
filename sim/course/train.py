@@ -15,11 +15,11 @@ MAX_REPOSITIONS = 3  # abort hopeless training episodes early
 
 
 def _evaluate(args):
-    flat, seeds, max_time = args
+    flat, seeds, max_time, with_random = args
     policy = MLPPolicy().set_flat(flat)
     returns, scores, finished = [], [], []
     for s in seeds:
-        ret, info, _ = rollout(policy, s, max_time, max_repositions=MAX_REPOSITIONS)
+        ret, info, _ = rollout(policy, s, max_time, max_repositions=MAX_REPOSITIONS, with_random=with_random)
         returns.append(ret)
         scores.append(info["score"])
         finished.append(info["finished"])
@@ -41,6 +41,7 @@ def main():
     ap.add_argument("--lr", type=float, default=0.03)
     ap.add_argument("--max-time", type=float, default=45.0, help="seconds per training episode")
     ap.add_argument("--workers", type=int, default=mp.cpu_count())
+    ap.add_argument("--no-random", action="store_true", help="train on the 17 static blocks only (no yellow random block)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=str(CHECKPOINT_DIR / "policy.npz"))
     ap.add_argument("--resume", default=None)
@@ -65,7 +66,7 @@ def main():
             seeds = [gen * 100 + k for k in range(args.layouts)]
             eps = rng.standard_normal((args.pairs, theta.size))
             cands = np.concatenate([theta + args.sigma * eps, theta - args.sigma * eps])
-            jobs = [(c, seeds, args.max_time) for c in cands]
+            jobs = [(c, seeds, args.max_time, not args.no_random) for c in cands]
             res = np.array(pool.map(_evaluate, jobs, chunksize=2))
             ret = res[:, 0]
             u = _ranks(ret)
@@ -77,7 +78,7 @@ def main():
 
             msg = f"gen {gen:4d} | pop ret mean {ret.mean():7.1f} max {ret.max():7.1f} | finish {res[:, 2].mean():4.2f}"
             if gen % 5 == 0 or gen == 1:
-                val = _evaluate((theta, val_seeds, args.max_time))
+                val = _evaluate((theta, val_seeds, args.max_time, not args.no_random))
                 msg += f" | VAL ret {val[0]:7.1f} score {val[1]:6.1f} finish {val[2]:4.2f}"
                 MLPPolicy().set_flat(theta).save(out.with_name(out.stem + "_last.npz"))
                 if val[0] > best_val:

@@ -66,8 +66,8 @@ class HeuristicPolicy:
         return np.clip([v - 0.5 * steer, v + 0.5 * steer], -1.0, 1.0)
 
 
-def rollout(policy, seed, max_time=240.0, record=False, max_repositions=None):
-    env = MicromouseEnv(max_time=max_time, max_repositions=max_repositions)
+def rollout(policy, seed, max_time=240.0, record=False, max_repositions=None, with_random=True):
+    env = MicromouseEnv(max_time=max_time, max_repositions=max_repositions, with_random=with_random)
     obs = env.reset(seed)
     if hasattr(policy, "reset"):
         policy.reset(env)  # planners read the car's own map / pose estimate / ToF from env

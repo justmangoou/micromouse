@@ -24,5 +24,5 @@ There is no automatic straight-line fallback.
 
 Firmware tuning/start/finish settings live in `src/course.cpp`, the stored map in
 `include/map_data.h`, and sensor geometry/wiring in `include/config.h`.
-Build with `pio run -e obstacle_avoidance`; run host logic tests with
+Build with `pio run -e course_nav`; run host logic tests with
 `pio test -e native`.

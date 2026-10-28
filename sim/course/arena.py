@@ -77,12 +77,44 @@ class Layout:
     is_random: np.ndarray  # (N,) bool  (only present in the scored run)
 
 
+_PLANNED = []
+
+
+def planned_path():
+    """The A* route on the static map alone (cm, (N,2)): where the car goes when nothing unmapped is in the way."""
+    if not _PLANNED:
+        from .env import MicromouseEnv
+        from .planner import AStarDriver
+
+        env = MicromouseEnv(with_random=False)
+        env.reset(1)
+        driver = AStarDriver()
+        driver.reset(env)
+        _PLANNED.append(np.asarray(driver.path, float))
+    return _PLANNED[0]
+
+
+def _sample_random_block(rng, static):
+    """Uniform over cells 4 and 5, kept off the tape and the static blocks; mostly sitting on the planned route."""
+    on_path = rng.random() < C.RANDOM_ON_PATH
+    path = planned_path() if on_path else None
+    while True:
+        p = rng.uniform((C.RANDOM_X_MIN, 0.0), (C.ARENA_W, C.ARENA_H))
+        if not inside_track(p, -C.RANDOM_EDGE_GAP)[0]:
+            continue
+        if np.abs(static - p).max(1).min() < C.RANDOM_BLOCK_GAP:
+            continue
+        if on_path and np.hypot(*(path - p).T).min() > C.RANDOM_PATH_BAND:
+            continue
+        return p
+
+
 def sample_layout(rng, with_random=True):
-    """The official map: 17 fixed blocks, plus (run 2) one random block on 1 of 4 spots."""
+    """The official map: 17 fixed blocks, plus (run 2) one random block placed in cells 4 and 5, mostly on the robot's path."""
     centers = C.STATIC_BLOCKS.copy()
     is_random = np.zeros(len(centers), bool)
     if with_random:
-        centers = np.vstack([centers, C.RANDOM_SPOTS[rng.integers(len(C.RANDOM_SPOTS))]])
+        centers = np.vstack([centers, [_sample_random_block(rng, centers)]])
         is_random = np.append(is_random, True)
     return Layout(centers, np.zeros(len(centers)), is_random)
 

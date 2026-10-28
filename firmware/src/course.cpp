@@ -1,6 +1,6 @@
 /**
  * @file    course.cpp
- * @brief   Block-course mode (env:obstacle_avoidance): plan with A* on the stored map, follow the path, replan around
+ * @brief   Block-course mode (env:course_nav): plan with A* on the stored map, follow the path, replan around
  *          blocks the map does not have, stop over the finish line.
  */
 #include <cmath>

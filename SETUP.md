@@ -72,11 +72,11 @@ ST-Link upload. Hard-float is forced through `fpu_flags.py` because the ststm32 
 
 ```
 firmware/
-  platformio.ini  one environment per navigation mode (micromouse, obstacle_avoidance) plus native host tests
+  platformio.ini  one environment per navigation mode (micromouse, course_nav) plus native host tests
   include/    config.h (robot constants), pins.h (pin plan), board.h, motor.h, tof_array.h, robot.h,
               map_data.h (generated), stm32f4xx_hal_conf.h
   src/        main.cpp     start-up and the sensor loop, shared by both modes
-              course.cpp   block-course mode: start pose, finish line, A* navigator (env:obstacle_avoidance)
+              course.cpp   block-course mode: start pose, finish line, A* navigator (env:course_nav)
               maze.cpp     maze mode: maze tuning, flood-fill explorer (env:micromouse)
               board.cpp (clock, GPIO, UART, I2C, ADC, PWM, encoder timers, speed loop timer), motor.cpp (motors and the
               wheel speed loop), tof_array.cpp (4x VL53L0X), remote.cpp (comms packets over USART1),
@@ -96,7 +96,7 @@ firmware/
 
 ```
 pio run -e micromouse -t upload          # maze mode (the default environment), flash over ST-Link
-pio run -e obstacle_avoidance -t upload  # block-course mode
+pio run -e course_nav -t upload  # block-course mode
 python tools/console.py PORT --baud 9600    # telemetry, logs, start/stop over USART1 (wired or HC-05)
 pio test -e native                       # host tests of lib/, no hardware needed
 python -m sim.course.export_map          # regenerate include/map_data.h and the test reference from the sim
@@ -202,7 +202,7 @@ match before trusting any score.
 | Tape | black, ~2 cm wide, along the outer edge and the U (the U centre is the 60 × 60 cm forbidden cell) |
 | Start line | green, left column, y = 0 |
 | Finish line | checkered, right column, y = 0 |
-| Blocks | 10 × 10 × 10 cm foam, fixed static layout from the layout sheet, plus 1 random (1 of 4 spots) in run 2 |
+| Blocks | 10 × 10 × 10 cm foam, fixed static layout from the layout sheet, plus 1 random (cell 4 or 5) in run 2 |
 
 The sim's coordinates: origin at the bottom-left corner of the floor, x right, y up (cm), the car starts
 at (30, −8) facing +y. Convert the layout sheet to these coordinates before using it.

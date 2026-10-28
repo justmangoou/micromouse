@@ -23,15 +23,21 @@ START_SIGMA = (0.3, 0.1, np.radians(0.9))
 OBSTACLE_SIZE = 10.0
 # Official map (rules update 12/10/2026): 17 static blocks at fixed positions, read off the diagram (block centres, cm).
 STATIC_BLOCKS = np.array(
-    [
-        [45, 115], [115, 115], [85, 100], [35, 90], [125, 85], [5, 75], [65, 75], [5, 55], [75, 65],
-        [95, 65], [55, 45], [145, 45], [30, 35], [55, 25], [175, 25], [5, 15], [145, 15],
+    [  # T1..T17 as numbered on the diagram
+        [5, 15], [55, 25], [30, 35], [55, 45], [5, 55], [5, 75], [35, 90], [45, 115], [65, 75],
+        [75, 65], [85, 100], [95, 65], [115, 115], [125, 85], [145, 45], [145, 15], [175, 25],
     ],
     float,
 )
-# Run 2 only: one extra block on 1 of 4 marked spots in the right corner cell / finish cell. The diagram does not
-# show the 4 marks, so these are placeholders -- replace them with the real ones.
-RANDOM_SPOTS = np.array([[155.0, 105.0], [160.0, 72.0], [160.0, 40.0], [128.0, 28.0]])
+# Run 2 only: one extra block, only in the two right-hand cells (Ô4 top-right, Ô5 finish cell, x >= 2 * CELL). Its centre
+# is drawn uniformly there, at least RANDOM_EDGE_GAP from the tape, not touching a static block, and RANDOM_ON_PATH of
+# the draws are kept within RANDOM_PATH_BAND of the route the planner picks on the static map (it squeezes between
+# T15/T16 and T17), i.e. sitting right in the robot's way.
+RANDOM_X_MIN = 2 * CELL
+RANDOM_EDGE_GAP = 6.0
+RANDOM_BLOCK_GAP = 10.5  # min Chebyshev distance between block centres (blocks are 10 cm)
+RANDOM_ON_PATH = 0.8
+RANDOM_PATH_BAND = 6.0
 DISTURB_DIST = 2.0  # a block pushed further than this from its mark counts as displaced
 
 # --- Scoring (Dieu 3, 5) ---------------------------------------------------

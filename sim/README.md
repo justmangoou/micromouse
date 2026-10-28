@@ -2,7 +2,7 @@
 
 Simulates run 2 (the scored, autonomous run) of *Luật thi xe dò mê cung*:
 180×120 cm floor, inverted-U track marked by black tape, the 17 fixed 10 cm blocks of the official map (rules update 12/10/2026) plus one
-random block on 1 of 4 spots in the right corner cell / finish cell, 240 s limit.
+random block in the two right-hand cells (Ô4, Ô5), 80 % of the time on the robot's path (`arena._sample_random_block`), 240 s limit.
 
 ## Layout
 
@@ -29,10 +29,14 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m sim.course.evaluate --baseline --episodes 20
 # train (evolution strategies; add --resume <file.npz> to continue, --out to choose where it saves)
 .venv/bin/python -m sim.course.train --generations 300 --layouts 5 --out sim/checkpoints/policy.npz
+# add --no-random to train on the 17 static blocks only (no yellow random block); evaluation always includes the random block
 # regenerate firmware/include/map_data.h and the host-test reference from the sim
 .venv/bin/python -m sim.course.export_map
 
 # 16x16 maze (search, then speed run)
+# one gif per random-block placement into a folder
+.venv/bin/python -m sim.tools.render_random_blocks --out docs/media/random_block --count 12
+
 .venv/bin/python -m sim.maze --seed 1 --episodes 12
 .venv/bin/python -m sim.maze --seed 1 --gif docs/media/maze.gif
 ```
@@ -157,7 +161,7 @@ the best on both. Differences of a few clean runs are inside the run-to-run nois
 ## Assumptions to check against the real event
 
 - The static layout is the official map, read off the diagram to the nearest 5 cm (`config.STATIC_BLOCKS`). The 4 random
-  spots are not marked in the diagram; `config.RANDOM_SPOTS` holds placeholders. The 6 / 3 dividing-line parts
+  spots are not marked in the diagram; the random block is sampled in cells 4 and 5, mostly on the path. The 6 / 3 dividing-line parts
   per tile (Điều 4) are my reading: 10 cm bands on straight tiles, 30° fans from the inside corner on corner tiles. A map built by hand-driving run 1 will have odometry drift that this sim does not model
   (mapping error here is 0.5 cm / 2°).
 - After a reposition the odometry is re-seeded at the placement pose (±1.5 cm, ±2°). A restarted car would
