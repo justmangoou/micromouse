@@ -27,10 +27,10 @@ DRIVE_PERIOD_S = 0.05  # robot stops after cfg::MANUAL_TIMEOUT_MS (300 ms) witho
 STATES = ["Ready", "Running", "Recovering", "Done", "Fault"]
 FAULTS = ["None", "Sensor", "Timing", "CommandExpired", "NoRoute", "Pose", "Configuration", "Timeout"]
 
-# ms; x, y (mm); th (mrad); v, target L/R (mm/s); 4 ranges (mm); valid mask, state, fault
-TELEMETRY_FORMAT = struct.Struct("<I6h4H3B")
+# ms; x, y (mm); th (mrad); v, target L/R (mm/s); 3 ranges (mm); valid mask, state, fault
+TELEMETRY_FORMAT = struct.Struct("<I6h3H3B")
 TELEMETRY_FIELDS = ["ms", "x", "y", "th", "v", "target_l", "target_r",
-                    "range0", "range1", "range2", "range3", "valid", "state", "fault"]
+                    "range0", "range1", "range2", "valid", "state", "fault"]
 
 GOLDEN_PING = bytes([0x05, 0x12, 0x07, 0xF9, 0x08, 0x00])  # Ping, seq 7; also checked in test/test_comms
 
@@ -111,7 +111,7 @@ def unpack_telemetry(payload):
 def describe(t):
     state = STATES[t["state"]] if t["state"] < len(STATES) else t["state"]
     fault = FAULTS[t["fault"]] if t["fault"] < len(FAULTS) else t["fault"]
-    ranges = " ".join("%4d%s" % (t["range%d" % i], "" if t["valid"] >> i & 1 else "?") for i in range(4))
+    ranges = " ".join("%4d%s" % (t["range%d" % i], "" if t["valid"] >> i & 1 else "?") for i in range(3))
     return "%8.2fs %-10s %-14s x%6d y%6d th%6.3f v%5d tgt%5d%5d  tof %s" % (
         t["ms"] / 1000, state, fault, t["x"], t["y"], t["th"] / 1000, t["v"], t["target_l"], t["target_r"], ranges)
 
@@ -121,7 +121,7 @@ def selftest():
     assert encode(PING, 7) == GOLDEN_PING
     payload = bytes(i if i % 3 else 0 for i in range(MAX_PAYLOAD))
     assert list(Decoder().feed(b"junk\x00" + encode(LOG, 200, payload))) == [(LOG, 200, payload)]
-    assert TELEMETRY_FORMAT.size == 27  # comms::TELEMETRY_SIZE
+    assert TELEMETRY_FORMAT.size == 25  # comms::TELEMETRY_SIZE
     assert pack_drive(-250.4, 99999) == bytes([0x06, 0xFF, 0xFF, 0x7F])  # test_comms: -250, saturated to 32767
     print("selftest ok")
 

@@ -4,18 +4,19 @@
  *          speed estimation and PID.
  *
  * @par Notes
- *   - Forward = PWM on A and B low, reverse = the other way, zero = both low (coast).
+ *   - TB6612-style driver: IN1 high / IN2 low = forward, IN1 low / IN2 high = reverse, both low = coast. The PWM
+ *     channel (a TIM1 complementary output) carries |duty|.
  */
 #pragma once
 
-#include "stm32f4xx_hal.h"
+#include "stm32f1xx_hal.h"
 #include "speed_controller.h"
 
 class Motor {
 public:
     // Timers are configured by boardInit(). Signs fix motor/encoder polarity.
-    Motor(TIM_HandleTypeDef* pwm, uint32_t channelA, uint32_t channelB,
-          TIM_HandleTypeDef* encoder, const speed_control::SpeedController& controller,
+    Motor(TIM_HandleTypeDef* pwm, uint32_t channel, GPIO_TypeDef* in1Port, uint16_t in1Pin,
+          GPIO_TypeDef* in2Port, uint16_t in2Pin, TIM_HandleTypeDef* encoder, const speed_control::SpeedController& controller,
           int motorSign = 1, int encoderSign = 1);
 
     void init();
@@ -29,7 +30,9 @@ private:
     uint16_t counter() const;
 
     TIM_HandleTypeDef* pwm_;
-    uint32_t channelA_, channelB_;
+    uint32_t channel_;
+    GPIO_TypeDef *in1Port_, *in2Port_;
+    uint16_t in1Pin_, in2Pin_;
     int motorSign_;
     TIM_HandleTypeDef* encoder_;
     int encoderSign_;
@@ -39,7 +42,7 @@ private:
     uint16_t lastOdometry_ = 0;
 };
 
-// TIM2/TIM4 count encoder pulses in hardware. motorTick() runs the speed
+// TIM2/TIM3 count encoder pulses in hardware. motorTick() runs the speed
 // estimate and PID at cfg::SPEED_LOOP_HZ; odometry reads counters separately.
 void motorInit();
 // Enabling starts a 150 ms command lease. Disabling clears both controllers.

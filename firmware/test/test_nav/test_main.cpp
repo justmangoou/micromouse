@@ -4,7 +4,7 @@
  *          planner, and a closed-loop run. Run with `pio test -e native` from firmware/.
  */
 #include <unity.h>
-#include "../robot_fixture.h"
+#include "../../include/config.h"
 
 #include <math.h>
 
@@ -14,8 +14,6 @@
 
 #include "../../include/map_data.h"
 #include "geometry.h"
-#include "floodfill.h"
-#include "micromouse.h"
 #include "navigator.h"
 #include "odometry.h"
 #include "planner.h"
@@ -33,59 +31,6 @@ static const nav::NavParams kCar;  // the car the closed-loop test simulates: sa
 
 void setUp() {}
 void tearDown() {}
-
-void test_floodfill_center_and_boundaries() {
-    FloodFill maze;
-    TEST_ASSERT_EQUAL_UINT16(14, maze.distance({0, 0}));
-    TEST_ASSERT_EQUAL_UINT16(0, maze.distance({7, 8}));
-    TEST_ASSERT_EQUAL_UINT16(14, maze.distance({15, 15}));
-    TEST_ASSERT_FALSE(maze.setPassage({0, 0}, Direction::West, Passage::Open));
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(Passage::Wall), static_cast<int>(maze.passage({0, 0}, Direction::West)));
-    TEST_ASSERT_FALSE(maze.reset(17, 16));
-    TEST_ASSERT_EQUAL_INT(16, maze.width());
-    TEST_ASSERT_TRUE(maze.reset(3, 5));
-    TEST_ASSERT_EQUAL_UINT16(3, maze.distance({0, 0}));
-    Cell next{-1, -1};
-    Direction dir = Direction::West;
-    TEST_ASSERT_TRUE(maze.nextMove({0, 0}, Direction::North, next, dir));
-    TEST_ASSERT_EQUAL_INT(0, next.x);
-    TEST_ASSERT_EQUAL_INT(1, next.y);
-    TEST_ASSERT_FALSE(maze.nextMove({1, 2}, dir, next, dir));
-    TEST_ASSERT_FALSE(maze.nextMove({-1, 0}, dir, next, dir));
-}
-
-void test_floodfill_wall_updates_and_known_routes() {
-    FloodFill maze;
-    maze.reset(3, 3);
-    Cell goal{2, 0};
-    TEST_ASSERT_TRUE(maze.setGoals(&goal, 1));
-    TEST_ASSERT_EQUAL_UINT16(2, maze.distance({0, 0}));
-    maze.setPassage({0, 0}, Direction::East, Passage::Wall);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(Passage::Wall), static_cast<int>(maze.passage({1, 0}, Direction::West)));
-    TEST_ASSERT_EQUAL_UINT16(4, maze.distance({0, 0}));
-    Cell next{};
-    Direction dir = Direction::East;
-    TEST_ASSERT_TRUE(maze.nextMove({0, 0}, dir, next, dir));
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(Direction::North), static_cast<int>(dir));
-    maze.setMode(MazeMode::KnownOnly);
-    TEST_ASSERT_EQUAL_UINT16(FloodFill::UNREACHABLE, maze.distance({0, 0}));
-    TEST_ASSERT_FALSE(maze.nextMove({0, 0}, dir, next, dir));
-    maze.setPassage({0, 0}, Direction::North, Passage::Open);
-    maze.setPassage({0, 1}, Direction::East, Passage::Open);
-    maze.setPassage({1, 1}, Direction::East, Passage::Open);
-    maze.setPassage({2, 1}, Direction::South, Passage::Open);
-    TEST_ASSERT_EQUAL_UINT16(4, maze.distance({0, 0}));
-    maze.setPassage({1, 0}, Direction::West, Passage::Open);
-    maze.setPassage({1, 0}, Direction::East, Passage::Open);
-    TEST_ASSERT_EQUAL_UINT16(2, maze.distance({0, 0}));
-    maze.setPassage({0, 0}, Direction::East, Passage::Unknown);
-    TEST_ASSERT_EQUAL_UINT16(4, maze.distance({0, 0}));
-    maze.setPassage({0, 0}, Direction::North, Passage::Wall);
-    TEST_ASSERT_EQUAL_UINT16(FloodFill::UNREACHABLE, maze.distance({0, 0}));
-    Cell invalid{3, 0};
-    TEST_ASSERT_FALSE(maze.setGoals(&invalid, 1));
-    TEST_ASSERT_TRUE(maze.isGoal(goal));
-}
 
 static void buildMap(Block* out) {
     for (int i = 0; i < MAP_BLOCK_COUNT; i++) out[i] = Block(MAP_BLOCKS[i][0], MAP_BLOCKS[i][1], MAP_BLOCKS[i][2]);
@@ -338,122 +283,8 @@ void test_closed_loop_with_unmapped_blocks() {
 
 // Ideal range rays against the maze perimeter and a wall blocking the first
 // north passage. Exercise gyro-heading turns and cell advancement together.
-static void mazeRanges(const math::Pose& pose, float ranges[cfg::TOF_COUNT], int layout) {
-    for (int k = 0; k < cfg::TOF_COUNT; ++k) {
-        float c = cosf(pose.th), s = sinf(pose.th);
-        float ox = pose.x + c * cfg::TOF_LAYOUT.sensors[k].x - s * cfg::TOF_LAYOUT.sensors[k].y;
-        float oy = pose.y + s * cfg::TOF_LAYOUT.sensors[k].x + c * cfg::TOF_LAYOUT.sensors[k].y;
-        float dx = cosf(pose.th + cfg::TOF_LAYOUT.sensors[k].angle), dy = sinf(pose.th + cfg::TOF_LAYOUT.sensors[k].angle);
-        float r = cfg::TOF_MAX_MM;
-        for (float x : {0.0f, 540.0f, 180.0f}) {
-            if (x == 180 && layout != 2) continue;
-            if (fabsf(dx) < 1e-6f) continue;
-            float t = (x - ox) / dx, y = oy + t * dy;
-            float begin = x == 180 ? 180 : 0, end = x == 180 ? 360 : 540;
-            if (t >= 0 && y >= begin && y <= end) r = fminf(r, t);
-        }
-        for (float y : {0.0f, 540.0f, 180.0f, 360.0f}) {
-            if ((y == 180 && layout != 1) || (y == 360 && layout != 2) || fabsf(dy) < 1e-6f) continue;
-            float t = (y - oy) / dy, x = ox + t * dx;
-            float end = (y == 180 || y == 360) ? 180 : 540;
-            if (t >= 0 && x >= 0 && x <= end) r = fminf(r, t);
-        }
-        ranges[k] = fmaxf(cfg::TOF_MIN_MM, r);
-    }
-}
-
-void test_micromouse_closed_loop() {
-    for (int layout : {0, 1, 2}) { // open, blocked entry, dead end requiring a 180-degree turn
-        nav::MicromouseParams p = robotMazeParams();
-        p.width = p.height = 3;
-        nav::Micromouse mouse(cfg::TOF_LAYOUT, p);
-        TEST_ASSERT_TRUE(mouse.start(0));
-        math::Pose pose = mouse.startPose();
-        float actual[2] = {0, 0};
-        bool reliable[cfg::TOF_COUNT] = {true, true, true, true};
-        const float dt = 0.033f;
-        bool turned = false, backtracked = false;
-        for (float t = 0; t < 30; t += dt) {
-            float ranges[cfg::TOF_COUNT], command[2];
-            mazeRanges(pose, ranges, layout);
-            mouse.step(pose, ranges, reliable, t, command);
-            turned |= mouse.state() == nav::Micromouse::State::Turning;
-            backtracked |= mouse.heading() == nav::Direction::South;
-            TEST_ASSERT_NOT_EQUAL(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
-            if (mouse.state() == nav::Micromouse::State::Done) break;
-            for (int k = 0; k < 2; ++k) actual[k] += (command[k] - actual[k]) * (1 - expf(-dt / 0.04f));
-            float v = (actual[0] + actual[1]) / 2, w = (actual[1] - actual[0]) / p.track;
-            math::Pose previous = pose;
-            pose.x += v * cosf(pose.th + w * dt / 2) * dt;
-            pose.y += v * sinf(pose.th + w * dt / 2) * dt;
-            pose.th += w * dt;
-            TEST_ASSERT_TRUE(pose.x > 60 && pose.y > 60 && pose.x < 480 && pose.y < 480);
-            if (layout == 1 && pose.x < 180) TEST_ASSERT_TRUE(pose.y < 180);
-            if (layout == 2 && pose.x < 180) TEST_ASSERT_TRUE(pose.y < 360);
-            if (layout == 2 && (previous.x - 180) * (pose.x - 180) < 0) {
-                float crossingY = previous.y + (pose.y - previous.y) * (180 - previous.x) / (pose.x - previous.x);
-                TEST_ASSERT_TRUE(crossingY < 180 || crossingY > 360);
-            }
-        }
-        TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Done), static_cast<int>(mouse.state()));
-        TEST_ASSERT_TRUE(turned);
-        TEST_ASSERT_EQUAL_INT(1, mouse.cell().x);
-        TEST_ASSERT_EQUAL_INT(1, mouse.cell().y);
-        TEST_ASSERT_TRUE(hypotf(pose.x - 270, pose.y - 270) < 10.0f);
-        if (layout == 2) TEST_ASSERT_TRUE(backtracked);
-        if (layout == 1) TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Passage::Wall),
-                                               static_cast<int>(mouse.maze().passage({0, 0}, nav::Direction::North)));
-    }
-}
-
-void test_micromouse_faults_stop_commands() {
-    nav::Micromouse mouse(cfg::TOF_LAYOUT, robotMazeParams());
-    TEST_ASSERT_TRUE(mouse.start(0));
-    float ranges[cfg::TOF_COUNT] = {300, 300, 300, 300}, command[2];
-    bool reliable[cfg::TOF_COUNT] = {true, true, true, true};
-    math::Pose pose = mouse.startPose();
-    mouse.step(pose, ranges, reliable, 0, command); // verified open, starts advance
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Advancing), static_cast<int>(mouse.state()));
-    TEST_ASSERT_EQUAL_INT(0, mouse.cell().y); // not committed before reaching target
-    mouse.step(pose, ranges, reliable, 0.033f, command);
-    TEST_ASSERT_TRUE(command[0] > 0 && command[1] > 0);
-    reliable[1] = false;
-    mouse.step(pose, ranges, reliable, 0.066f, command);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
-    TEST_ASSERT_EQUAL_FLOAT(0, command[0]);
-    TEST_ASSERT_EQUAL_FLOAT(0, command[1]);
-
-    mouse.start(0);
-    mouse.step(pose, ranges, reliable, 0, command);
-    mouse.step(pose, ranges, reliable, 1.1f, command);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
-    reliable[1] = true;
-    mouse.start(0);
-    mouse.step(pose, ranges, reliable, 0, command);
-    mouse.step(pose, ranges, reliable, 6.1f, command); // stalled advancement
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
-    TEST_ASSERT_EQUAL_FLOAT(0, command[0]);
-
-    mouse.start(0);
-    mouse.step(pose, ranges, reliable, 0, command);
-    ranges[1] = ranges[2] = cfg::TOF_MIN_MM; // unexpected obstacle during advance
-    mouse.step(pose, ranges, reliable, 0.033f, command);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Micromouse::State::Fault), static_cast<int>(mouse.state()));
-    TEST_ASSERT_EQUAL_FLOAT(0, command[0]);
-    TEST_ASSERT_EQUAL_FLOAT(0, command[1]);
-
-    mouse.start(0);
-    ranges[1] = ranges[2] = cfg::TOF_MAX_MM; // no-target is not evidence of open space
-    mouse.step(pose, ranges, reliable, 0, command);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(nav::Passage::Unknown),
-                          static_cast<int>(mouse.maze().passage({0, 0}, nav::Direction::North)));
-    TEST_ASSERT_EQUAL_FLOAT(0, command[0]);
-}
-
 int main() {
     UNITY_BEGIN();
-    RUN_TEST(test_floodfill_center_and_boundaries);
-    RUN_TEST(test_floodfill_wall_updates_and_known_routes);
     RUN_TEST(test_geometry);
     RUN_TEST(test_odometry_straight_and_turn);
     RUN_TEST(test_gyro_bias_tracker);
@@ -464,7 +295,5 @@ int main() {
     RUN_TEST(test_speed_estimator);
     RUN_TEST(test_planner_matches_python);
     RUN_TEST(test_closed_loop_with_unmapped_blocks);
-    RUN_TEST(test_micromouse_closed_loop);
-    RUN_TEST(test_micromouse_faults_stop_commands);
     return UNITY_END();
 }

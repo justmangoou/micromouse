@@ -1,8 +1,8 @@
 /**
  * @file    config.h
- * @brief   Board pin assignments and robot constants shared by both navigation modes: geometry, direction fixes, wheel speed
+ * @brief   Board pin assignments and robot constants shared by the run modes: geometry, direction fixes, wheel speed
  *          loop gains, timing. They mirror sim/config.py; replace them with the measured values (SETUP.md, section 5).
- *          Mode settings live with the mode: src/course.cpp (start pose, finish) and src/maze.cpp (maze tuning).
+ *          Mode settings live with the mode: src/course.cpp (start pose, finish).
  */
 #pragma once
 
@@ -11,53 +11,50 @@
 #include "odometry.h"
 #include "tof_layout.h"
 
-// Board wiring: Black Pill STM32F411CE. Verify against the physical wiring.
+// Board wiring: Blue Pill STM32F103C8 (schematic in the repo root). Verify against the physical wiring.
 
-// Motor 1 = left, motor 2 = right. Each H-bridge has two PWM inputs (A, B): TIM3 CH1..CH4, AF2.
-//   MT1A PA6 (CH1), MT1B PA7 (CH2), MT2A PB0 (CH3), MT2B PB1 (CH4)
+// Motor A = left, motor B = right (TB6612-style driver). Direction pins are plain GPIO, speed is PWM:
+//   A: AIN1 PB1, AIN2 PB0, PWMA PB14 = TIM1_CH2N      B: BIN1 PB10, BIN2 PB11, PWMB PB13 = TIM1_CH1N
+// Encoders (quadrature, hardware): left ENLB PA0 / ENLA PA1 on TIM2, right ENRA PA6 / ENRB PA7 on TIM3.
+// I2C1: PB6 SCL, PB7 SDA. USART1: PA9 TX, PA10 RX. SWD: PA13 / PA14 (JTAG is released for PB3, PB4, PA15).
+// Buttons on PB9 and PB8, status LED PC13. The wheel speed loop runs from TIM4.
 
-// Encoders (quadrature): CL1 = left on TIM2 PA0 / PA1 (AF1), CL2 = right on TIM4 PB6 / PB7 (AF2)
-// I2C1: PB8 SCL, PB9 SDA (AF4). USART1: PA9 TX, PA10 RX (AF7). SWD: PA13 / PA14.
+#define MOTOR_A_IN1_PORT GPIOB
+#define MOTOR_A_IN1_PIN  GPIO_PIN_1
+#define MOTOR_A_IN2_PORT GPIOB
+#define MOTOR_A_IN2_PIN  GPIO_PIN_0
+#define MOTOR_B_IN1_PORT GPIOB
+#define MOTOR_B_IN1_PIN  GPIO_PIN_10
+#define MOTOR_B_IN2_PORT GPIOB
+#define MOTOR_B_IN2_PIN  GPIO_PIN_11
 
-// VL53L0X shutdown lines. Sensor k must match TOF_LAYOUT.sensors[k]: 0..3 = right edge,
-// right middle, left middle, left edge. Swap pins here if the wiring differs. One entry per sensor, cfg::TOF_COUNT in all.
+// VL53L0X shutdown lines. Five are wired (senL PB4, senL1 PB3, senF PA15, senR1 PA12, senR PA11) but only three
+// sensors are used: right 45 deg, front, left 45 deg. Sensor k must match TOF_LAYOUT.sensors[k]. The two unused
+// lines are driven low in gpioInit() so those sensors stay in reset and do not answer at the default address.
 #define TOF_XSHUT_PORTS \
-    { GPIOA, GPIOB, GPIOB, GPIOB }
+    { GPIOA, GPIOA, GPIOB }
 #define TOF_XSHUT_PINS \
-    { GPIO_PIN_15, GPIO_PIN_3, GPIO_PIN_4, GPIO_PIN_5 }
+    { GPIO_PIN_12, GPIO_PIN_15, GPIO_PIN_3 }
+#define TOF_UNUSED_XSHUT_A_PINS (GPIO_PIN_11)  // senR
+#define TOF_UNUSED_XSHUT_B_PINS (GPIO_PIN_4)   // senL
 
-// User buttons USER_BTN (PA2) and USER_BTN2 (PA3), active low with pull-ups.
-#define BUTTON_PORT  GPIOA
-#define BUTTON_PIN   GPIO_PIN_2
-#define BUTTON2_PORT GPIOA
-#define BUTTON2_PIN  GPIO_PIN_3
-// Status LED L_STATUS (PC13, active low)
+// Buttons, active low with pull-ups: USER_BTN (PB9) starts the run, USER_BTN2 (PB8) spare.
+#define BUTTON_PORT  GPIOB
+#define BUTTON_PIN   GPIO_PIN_9
+#define BUTTON2_PORT GPIOB
+#define BUTTON2_PIN  GPIO_PIN_8
+// Status LED (PC13, active low)
 #define LED_PORT GPIOC
 #define LED_PIN  GPIO_PIN_13
-
-// User LEDs L1 (PA8) and L2 (PB15), active high
-#define L1_PORT GPIOA
-#define L1_PIN  GPIO_PIN_8
-#define L2_PORT GPIOB
-#define L2_PIN  GPIO_PIN_15
-
-// Switches SW1..SW3 (PB12, PB13, PB14), pulled up, active low
-#define SW_PORT GPIOB
-#define SW_PINS \
-    { GPIO_PIN_12, GPIO_PIN_13, GPIO_PIN_14 }
-
-// Battery sense BAT: PA4 = ADC1_IN4
-#define BAT_PORT    GPIOA
-#define BAT_PIN     GPIO_PIN_4
-#define BAT_CHANNEL ADC_CHANNEL_4
 
 namespace cfg {
 
 // Physical ToF layout. Indices match the XSHUT wiring above.
-constexpr int TOF_COUNT = 4;
-constexpr int TOF_RIGHT_EDGE = 0, TOF_RIGHT_MIDDLE = 1, TOF_LEFT_MIDDLE = 2, TOF_LEFT_EDGE = 3;
-constexpr float TOF_ANGLE_DEG[TOF_COUNT] = {-60.0f, -20.0f, 20.0f, 60.0f};
-constexpr float TOF_MOUNT_MM[TOF_COUNT][2] = {{60.0f, -45.0f}, {60.0f, -20.0f}, {60.0f, 20.0f}, {60.0f, 45.0f}};
+constexpr int TOF_COUNT = 3;
+constexpr int TOF_RIGHT_45 = 0, TOF_FRONT = 1, TOF_LEFT_45 = 2;
+constexpr float TOF_ANGLE_DEG[TOF_COUNT] = {-45.0f, 0.0f, 45.0f};
+// Mount position in the body frame (x forward, y left), mm. Placeholder values: measure them on the robot.
+constexpr float TOF_MOUNT_MM[TOF_COUNT][2] = {{60.0f, -30.0f}, {65.0f, 0.0f}, {60.0f, 30.0f}};
 constexpr int TOF_FOV_RAYS = 5;
 constexpr float TOF_FOV_DEG[TOF_FOV_RAYS] = {-12.0f, -6.0f, 0.0f, 6.0f, 12.0f};
 constexpr float TOF_MIN_MM = 30.0f;
@@ -91,7 +88,7 @@ constexpr float MM_PER_COUNT    = 2.0f * math::PI * WHEEL_RADIUS_MM / COUNTS_PER
 
 // Direction fixes found during bring-up: +1 or -1 so that "forward" counts up and drives forward.
 constexpr int ENC_SIGN_L   = 1;
-constexpr int ENC_SIGN_R   = 1;
+constexpr int ENC_SIGN_R   = -1;  // found on the bench: motor B forward counts down on the right encoder
 constexpr int MOTOR_SIGN_L = 1;
 constexpr int MOTOR_SIGN_R = 1;
 constexpr float GYRO_SIGN  = 1.0f;       // +1 when positive gyro-z is a CCW (left) turn
@@ -123,7 +120,7 @@ constexpr float SPEED_CORR_LIMIT = 0.3f;
 constexpr float SPEED_TARGET_DEADBAND_MM_S = 10.0f;  // PID bypass below this target magnitude; feed-forward remains
 
 // Timing
-constexpr unsigned SPEED_LOOP_HZ = 200;     // wheel speed loop: one TIM11 interrupt per period (board.cpp)
+constexpr unsigned SPEED_LOOP_HZ = 200;     // wheel speed loop: one TIM4 interrupt per period (board.cpp)
 constexpr float SPEED_LOOP_DT_S = 1.0f / SPEED_LOOP_HZ;
 constexpr unsigned CONTROL_PERIOD_MS = 33;  // ToF timing budget, navigation and odometry step
 constexpr unsigned GYRO_PERIOD_MS = 5;      // gyro read, averaged over each control step

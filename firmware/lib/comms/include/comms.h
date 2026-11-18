@@ -58,7 +58,7 @@ private:
     uint32_t errors_ = 0;
 };
 
-constexpr int TELEMETRY_RANGES = 4;
+constexpr int TELEMETRY_RANGES = 3;
 
 // Engineering units here; pack() quantizes (mm, mrad, mm/s as int16, ranges as uint16 mm) and saturates.
 struct Telemetry {

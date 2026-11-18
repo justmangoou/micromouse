@@ -43,7 +43,7 @@ Telemetry (`comms::Telemetry`, sent every `cfg::TELEMETRY_PERIOD_MS`, 100 ms):
 | th | i16 | mrad |
 | v | i16 | mm/s, forward |
 | target L, R | i16 | mm/s, wheel targets this step |
-| range ×4 | u16 | mm, clamped ToF in sensor order |
+| range ×3 | u16 | mm, clamped ToF in sensor order |
 | valid | u8 | bit i: range i is fresh, valid data |
 | state, fault | u8 | `reliability::State`, `reliability::Fault` |
 

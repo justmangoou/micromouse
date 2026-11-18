@@ -1,6 +1,6 @@
 /**
  * @file    robot.h
- * @brief   What main.cpp shares with the navigation mode it was built with (course.cpp or maze.cpp): the start-up
+ * @brief   What main.cpp shares with the navigation mode it was built with (course.cpp or manual.cpp): the start-up
  *          result and a sensor loop that hands over one control step at a time.
  */
 #pragma once

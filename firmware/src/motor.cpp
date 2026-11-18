@@ -1,7 +1,7 @@
 /**
  * @file    motor.cpp
- * @brief   Motor PWM and wheel control implementation. TIM11 runs the speed
- *          loop at cfg::SPEED_LOOP_HZ; TIM2/TIM4 decode encoders in hardware.
+ * @brief   Motor PWM and wheel control implementation. TIM4 runs the speed
+ *          loop at cfg::SPEED_LOOP_HZ; TIM2/TIM3 decode encoders in hardware.
  */
 #include "motor.h"
 
@@ -17,14 +17,16 @@ void Motor::setDuty(float u) {
     if (u < -1.0f) u = -1.0f;
     uint32_t top = __HAL_TIM_GET_AUTORELOAD(pwm_) + 1;  // full period of the PWM timer
     uint32_t pulse = (uint32_t)((u < 0 ? -u : u) * top);
-    __HAL_TIM_SET_COMPARE(pwm_, channelA_, u > 0.0f ? pulse : 0);
-    __HAL_TIM_SET_COMPARE(pwm_, channelB_, u < 0.0f ? pulse : 0);
+    HAL_GPIO_WritePin(in1Port_, in1Pin_, u > 0.0f ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(in2Port_, in2Pin_, u < 0.0f ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    __HAL_TIM_SET_COMPARE(pwm_, channel_, pulse);
 }
 
-Motor::Motor(TIM_HandleTypeDef* pwm, uint32_t channelA, uint32_t channelB,
-             TIM_HandleTypeDef* encoder, const speed_control::SpeedController& controller,
-             int motorSign, int encoderSign)
-    : pwm_(pwm), channelA_(channelA), channelB_(channelB), motorSign_(motorSign),
+Motor::Motor(TIM_HandleTypeDef* pwm, uint32_t channel, GPIO_TypeDef* in1Port, uint16_t in1Pin,
+             GPIO_TypeDef* in2Port, uint16_t in2Pin, TIM_HandleTypeDef* encoder,
+             const speed_control::SpeedController& controller, int motorSign, int encoderSign)
+    : pwm_(pwm), channel_(channel), in1Port_(in1Port), in2Port_(in2Port), in1Pin_(in1Pin), in2Pin_(in2Pin),
+      motorSign_(motorSign),
       encoder_(encoder), encoderSign_(encoderSign), controller_(controller) {}
 
 uint16_t Motor::counter() const { return static_cast<uint16_t>(__HAL_TIM_GET_COUNTER(encoder_)); }
@@ -85,8 +87,11 @@ speed_control::SpeedController makeController() {
         cfg::SPEED_TARGET_DEADBAND_MM_S);
 }
 
-Motor gLeft(&htim3, TIM_CHANNEL_1, TIM_CHANNEL_2, &htim2, makeController(), cfg::MOTOR_SIGN_L, cfg::ENC_SIGN_L);
-Motor gRight(&htim3, TIM_CHANNEL_3, TIM_CHANNEL_4, &htim4, makeController(), cfg::MOTOR_SIGN_R, cfg::ENC_SIGN_R);
+// Motor A (left): PWMA = TIM1_CH2N. Motor B (right): PWMB = TIM1_CH1N.
+Motor gLeft(&htim1, TIM_CHANNEL_2, MOTOR_A_IN1_PORT, MOTOR_A_IN1_PIN, MOTOR_A_IN2_PORT, MOTOR_A_IN2_PIN, &htim2,
+            makeController(), cfg::MOTOR_SIGN_L, cfg::ENC_SIGN_L);
+Motor gRight(&htim1, TIM_CHANNEL_1, MOTOR_B_IN1_PORT, MOTOR_B_IN1_PIN, MOTOR_B_IN2_PORT, MOTOR_B_IN2_PIN, &htim3,
+             makeController(), cfg::MOTOR_SIGN_R, cfg::ENC_SIGN_R);
 
 }  // namespace
 

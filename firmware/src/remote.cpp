@@ -1,7 +1,7 @@
 /**
  * @file    remote.cpp
  * @brief   USART1 packet transport. The interrupt moves bytes between the data register and two ring buffers; the
- *          main loop frames and parses. USART1 sits below TIM11 in priority so the speed loop is never delayed.
+ *          main loop frames and parses. USART1 sits below TIM4 in priority so the speed loop is never delayed.
  */
 #include "remote.h"
 

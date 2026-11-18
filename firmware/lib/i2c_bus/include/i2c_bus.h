@@ -3,8 +3,8 @@
  * @brief   Register-style read/write helpers over one STM32 HAL I2C peripheral, shared by every I2C driver.
  *
  * @par References (from memory: check against your copies)
- *   - RM0383, STM32F411xC/E reference manual, I2C chapter (transfer sequences, BUSY / AF / BERR flags)
- *   - ES0287, STM32F411xC/E errata sheet (I2C peripheral limitations; BUSY can stay set after a bus error)
+ *   - RM0008, STM32F10xxx reference manual, I2C chapter (transfer sequences, BUSY / AF / BERR flags)
+ *   - ES0340, STM32F103x8/xB errata sheet (I2C peripheral limitations; BUSY can stay set after a bus error)
  *
  * @par Notes
  *   - Blocking and polled. Call it from the main loop only, never from an interrupt.
@@ -14,7 +14,7 @@
 #pragma once
 
 #include <optional>
-#include "stm32f4xx_hal.h"
+#include "stm32f1xx_hal.h"
 
 class I2cBus {
 public:

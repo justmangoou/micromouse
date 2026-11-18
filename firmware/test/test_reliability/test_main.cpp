@@ -1,9 +1,8 @@
 #include <unity.h>
-#include "../robot_fixture.h"
+#include "../../include/config.h"
 #include <limits>
 #include "reliability.h"
 #include "navigator.h"
-#include "micromouse.h"
 #include "odometry.h"
 #include "../../include/map_data.h"
 using namespace reliability;
@@ -90,38 +89,17 @@ void test_encoder_only_odometry() {
     TEST_ASSERT_EQUAL_FLOAT(heading, odo.pose.th);
 }
 
-void test_maze_pause_retains_phase_and_knowledge() {
-    nav::Micromouse mouse(cfg::TOF_LAYOUT, robotMazeParams());
-    TEST_ASSERT_TRUE(mouse.start(0));
-    float ranges[4] = {300, 300, 300, 300};
-    bool valid[4] = {true, true, true, true};
-    float command[2];
-    mouse.step(mouse.startPose(), ranges, valid, 0.1f, command);
-    TEST_ASSERT_EQUAL((int)nav::Micromouse::State::Advancing, (int)mouse.state());
-    auto passage = mouse.maze().passage({0, 0}, nav::Direction::North);
-    mouse.pause(0.2f);
-    mouse.step(mouse.startPose(), ranges, valid, 10, command);
-    TEST_ASSERT_EQUAL_FLOAT(0, command[0]);
-    TEST_ASSERT_TRUE(mouse.resume(10));
-    mouse.step(mouse.startPose(), ranges, valid, 10.01f, command);
-    TEST_ASSERT_EQUAL((int)nav::Micromouse::State::Advancing, (int)mouse.state());
-    TEST_ASSERT_TRUE(command[0] > 0);
-    TEST_ASSERT_EQUAL((int)passage, (int)mouse.maze().passage({0, 0}, nav::Direction::North));
-    mouse.pause(10.02f);
-    TEST_ASSERT_FALSE(mouse.resume(241));
-}
-
 void test_snapshot_rejects_stale_missing_and_invalid_data() {
     SensorSnapshot<cfg::TOF_COUNT> s;
     s.now = s.gyroAt = s.completedAt = 100;
     s.dt = 0.033f;
     s.gyroSamples = 6;
     for (auto& range : s.ranges) range = {300, 100, RangeStatus::Valid, 0};
-    TEST_ASSERT_EQUAL((int)Fault::None, (int)s.issue(100, 15, true, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
-    TEST_ASSERT_EQUAL((int)Fault::Sensor, (int)s.issue(100, 15, false, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
-    TEST_ASSERT_EQUAL((int)Fault::Sensor, (int)s.issue(100, 15, true, false, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
+    TEST_ASSERT_EQUAL((int)Fault::None, (int)s.issue(100, 7, true, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
+    TEST_ASSERT_EQUAL((int)Fault::Sensor, (int)s.issue(100, 7, false, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
+    TEST_ASSERT_EQUAL((int)Fault::Sensor, (int)s.issue(100, 7, true, false, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
     s.ranges[0].status = RangeStatus::Invalid;
-    TEST_ASSERT_EQUAL((int)Fault::Sensor, (int)s.issue(100, 15, true, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
+    TEST_ASSERT_EQUAL((int)Fault::Sensor, (int)s.issue(100, 7, true, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
     TEST_ASSERT_EQUAL((int)Fault::None, (int)s.issue(100, 6, true, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
     s.gyroSamples = 0;
     TEST_ASSERT_EQUAL((int)Fault::Sensor, (int)s.issue(100, 6, true, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
@@ -158,25 +136,6 @@ void test_encoder_gap_limit_and_recovery_wrap() {
     TEST_ASSERT_FALSE(q.update(start + 502, true, true));
 }
 
-void test_maze_resume_aligns_before_advancing() {
-    nav::Micromouse mouse(cfg::TOF_LAYOUT, robotMazeParams());
-    TEST_ASSERT_TRUE(mouse.start(0));
-    float ranges[4] = {300, 300, 300, 300};
-    bool valid[4] = {true,true,true,true};
-    float command[2];
-    auto pose = mouse.startPose();
-    mouse.step(pose, ranges, valid, 0.1f, command);
-    mouse.pause(0.2f);
-    TEST_ASSERT_TRUE(mouse.resume(1));
-    pose.th += 0.2f;
-    mouse.step(pose, ranges, valid, 1.01f, command);
-    TEST_ASSERT_TRUE(command[0] * command[1] < 0);
-    TEST_ASSERT_EQUAL((int)nav::Micromouse::State::Advancing, (int)mouse.state());
-    pose.th = mouse.startPose().th;
-    mouse.step(pose, ranges, valid, 1.02f, command);
-    TEST_ASSERT_TRUE(command[0] > 0 && command[1] > 0);
-}
-
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_freshness_and_lease_wrap);
@@ -184,9 +143,7 @@ int main() {
     RUN_TEST(test_no_path_never_commands_motion);
     RUN_TEST(test_failed_replan_clears_old_route_and_preserves_obstacles);
     RUN_TEST(test_encoder_only_odometry);
-    RUN_TEST(test_maze_pause_retains_phase_and_knowledge);
     RUN_TEST(test_snapshot_rejects_stale_missing_and_invalid_data);
     RUN_TEST(test_encoder_gap_limit_and_recovery_wrap);
-    RUN_TEST(test_maze_resume_aligns_before_advancing);
     return UNITY_END();
 }

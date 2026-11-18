@@ -2,7 +2,7 @@
  * @file    vl53l0x_impl.cpp
  * @brief   Implements the I2C functions ST's VL53L0X API expects. See vl53l0x_impl.h.
  */
-#include "stm32f4xx_hal.h"
+#include "stm32f1xx_hal.h"
 #include "vl53l0x_platform.h"
 #include "vl53l0x_impl.h"
 

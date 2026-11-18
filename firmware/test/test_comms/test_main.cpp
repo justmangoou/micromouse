@@ -81,8 +81,7 @@ void test_telemetry_round_trip_and_saturation() {
     t.range[0] = 50.0f;
     t.range[1] = -5.0f;  // sent as 0
     t.range[2] = 70000.0f;
-    t.range[3] = 1200.0f;
-    t.validRanges = 0b1011;
+    t.validRanges = 0b101;
     t.state = 1;
     t.fault = 4;
     uint8_t payload[MAX_PAYLOAD];
@@ -103,7 +102,7 @@ void test_telemetry_round_trip_and_saturation() {
     TEST_ASSERT_EQUAL_FLOAT(50.0f, r.range[0]);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, r.range[1]);
     TEST_ASSERT_EQUAL_FLOAT(65535.0f, r.range[2]);
-    TEST_ASSERT_EQUAL(0b1011, r.validRanges);
+    TEST_ASSERT_EQUAL(0b101, r.validRanges);
     TEST_ASSERT_EQUAL(1, r.state);
     TEST_ASSERT_EQUAL(4, r.fault);
     Packet wrong = d.packet();

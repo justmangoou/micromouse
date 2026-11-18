@@ -1,11 +1,11 @@
 /**
  * @file    main.cpp
- * @brief   Start-up and sensor loop shared by both navigation modes. The mode itself is course.cpp (block course, A*)
- *          or maze.cpp (16 x 16 maze, flood fill); platformio.ini builds one of them per environment.
+ * @brief   Start-up and sensor loop shared by the run modes. The mode itself is course.cpp (block course, A*) or
+ *          manual.cpp (host-driven wheels); platformio.ini builds one of them per environment.
  *
  * @par Flow
  *   power on -> sensors up -> gyro calibration (keep the robot still) -> runMode(): wait for the button, then run at
- *   30 Hz (ToF, odometry, navigation) while the 200 Hz TIM11 interrupt closes the wheel speed loop.
+ *   30 Hz (ToF, odometry, navigation) while the 200 Hz TIM4 interrupt closes the wheel speed loop.
  */
 #include <stdio.h>
 #include <cmath>
