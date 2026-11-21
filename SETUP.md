@@ -79,11 +79,10 @@ firmware/
               course.cpp   block-course mode: start pose, finish line, A* navigator (env:course_nav)
               maze.cpp     maze mode: maze tuning, flood-fill explorer (env:micromouse)
               board.cpp (clock, GPIO, UART, I2C, ADC, PWM, encoder timers, speed loop timer), motor.cpp (motors and the
-              wheel speed loop), tof_array.cpp (4x VL53L0X), remote.cpp (comms packets over USART1),
+              wheel speed loop), tof_array.cpp (4x VL53L0X),
               interrupts.cpp, syscalls.cpp
   lib/        each library has its own include/ and src/
     base/       math, odometry, PID and wheel speed control, reliability, ToF layout: pure logic, host-tested
-    comms/      packet protocol for the HC-05 link (telemetry, logs, start/stop): pure logic, host-tested
     course_nav/ arena geometry, A* planner and navigator (block course)
     micromouse/ flood fill and maze explorer
     i2c_bus/    shared register read/write helpers over the HAL I2C
@@ -91,24 +90,19 @@ firmware/
     vl53l0x_api/ ST VL53L0X API, portable core only (see its README)
     vl53l0x_impl/ the API's I2C functions implemented on I2cBus
   test/       host unit tests
-  tools/      console.py: host console for the comms link
 ```
 
 ```
 pio run -e micromouse -t upload          # maze mode (the default environment), flash over ST-Link
 pio run -e course_nav -t upload  # block-course mode
-python tools/console.py PORT --baud 9600    # telemetry, logs, start/stop over USART1 (wired or HC-05)
 pio test -e native                       # host tests of lib/, no hardware needed
 python -m sim.course.export_map          # regenerate include/map_data.h and the test reference from the sim
 ```
 
 **What it does.** Both modes start the same way (`main.cpp`): sensors up, then ~2 s of gyro bias calibration with the
-robot standing still. Then the mode waits for the KEY button (or `start` from the console) and runs at 30 Hz (4 ToF readings, fused odometry,
+robot standing still. Then the mode waits for the KEY button and runs at 30 Hz (4 ToF readings, fused odometry,
 navigation) while a 200 Hz timer interrupt (TIM11) closes the wheel speed loop; the encoders are decoded by hardware.
-The block-course mode plans on the stored map (`include/map_data.h`) and stops over the finish line. Both modes send
-telemetry at 10 Hz: pose, speed, wheel targets, the four ToF distances, state and fault (`lib/comms/README.md`);
-`tools/console.py --csv` records it. `stop` from the console ends a run. `pio run -e manual` builds a third mode where
-`drive L R` in the console sets the wheel speeds (mm/s) with a 300 ms dead-man timeout. The maze mode explores from the southwest cell, facing north, until it reaches a centre cell.
+The block-course mode plans on the stored map (`include/map_data.h`) and stops over the finish line. The maze mode explores from the southwest cell, facing north, until it reaches a centre cell.
 
 **Implemented and checked.**
 - Builds clean for the F411. Block course: about 47 KB flash (9 %) and 50 KB RAM (38 %, the planner's static arrays
@@ -116,7 +110,7 @@ telemetry at 10 Hz: pose, speed, wheel targets, the four ToF distances, state an
 - `lib/course_nav` owns the course A* planner and navigator; `lib/micromouse` owns maze exploration.
   `lib/base` holds the hardware-independent shared code: math types, odometry, the PID and speed estimate,
   reliability supervision, and the generic ToF layout. `pio test -e native` passes 44 tests:
-  comms framing and telemetry, flood fill, geometry, odometry, the wheel speed controller and estimator, the planner against the Python planner's
+  flood fill, geometry, odometry, the wheel speed controller and estimator, the planner against the Python planner's
   path length on the same map, a closed-loop course run with two unmapped blocks, and closed-loop maze runs with fault
   checks.
 
@@ -145,7 +139,7 @@ Do these in order and write down the numbers. Each one fills in a constant in `s
 
 1. **Flash and log.** Build and upload with `pio run -t upload` from `firmware/` over SWD with an ST-Link. If you have
    no probe, the F411 has a built-in USB DFU bootloader (hold BOOT0, reset, then upload with `upload_protocol = dfu`). Confirm the
-   serial output with `python tools/console.py PORT` (the `tof_test` build prints plain text for `pio device monitor`).
+   serial output with `python tools/console.py PORT` (the `test_tof` build prints plain text for `pio device monitor`).
 2. **Motors.** Wheels off the ground. Check direction for + and − duty and the PWM frequency (above audible, ~20 kHz).
    Sweep duty from 0 up and find the duty where each wheel starts to turn (the **deadband**; the sim uses 0.06).
 3. **Encoders.** Turn each wheel by hand exactly 10 revolutions and read the counts. Counts / 10 = counts per rev
