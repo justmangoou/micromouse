@@ -32,6 +32,13 @@ float blockClearance(math::Vec2 p, const Block& b);
 // Distance along the ray (o, unit d) to the block, or maxRange.
 float rayBlock(math::Vec2 o, math::Vec2 d, const Block& b, float maxRange);
 
+// Range along the ray to the nearest fixed wall: the arena's outer walls and the pit's three walls (the area below
+// y = 0 has no walls). maxRange if none is hit. The ToF sensors see these, so the scan must not mistake them for blocks.
+float rayWalls(math::Vec2 o, math::Vec2 d, float maxRange);
+
+// Distance from p to the nearest wall (the same walls as rayWalls).
+float wallClearance(math::Vec2 p);
+
 // On the inverted-U track. margin > 0 dilates it (tape), < 0 erodes it.
 bool insideTrack(math::Vec2 p, float margin);
 

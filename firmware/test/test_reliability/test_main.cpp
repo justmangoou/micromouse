@@ -10,6 +10,17 @@ static nav::Navigator navigator(cfg::TOF_LAYOUT);
 void setUp() {}
 void tearDown() {}
 
+void test_lease_can_be_extended_for_one_blocking_job() {
+    CommandLease lease;
+    lease.publish(1000);
+    TEST_ASSERT_TRUE(lease.expired(1000 + MAX_AGE_MS));          // normal lease: 150 ms
+    lease.extend(1000, 600);                                      // a route plan is about to block the loop
+    TEST_ASSERT_FALSE(lease.expired(1000 + 400));
+    TEST_ASSERT_TRUE(lease.expired(1000 + 600));
+    lease.publish(2000);                                          // the next command restores the normal lease
+    TEST_ASSERT_TRUE(lease.expired(2000 + MAX_AGE_MS));
+}
+
 void test_freshness_and_lease_wrap() {
     uint32_t start = UINT32_MAX - 40;
     TEST_ASSERT_TRUE(fresh(30, start));
@@ -62,17 +73,16 @@ void test_no_path_never_commands_motion() {
     TEST_ASSERT_EQUAL_FLOAT(0, command[1]);
 }
 
-void test_failed_replan_clears_old_route_and_preserves_obstacles() {
+void test_detected_blocks_that_seal_the_route_are_dropped() {
     navigator.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
     TEST_ASSERT_TRUE(navigator.start({300, -80, math::PI / 2}, 0));
-    // A continuous barrier across the left corridor, retained across retries.
+    // A continuous barrier of detected blocks across the left corridor: estimates, so the planner falls back to the
+    // mapped course instead of stopping.
     auto& planner = const_cast<nav::Planner&>(navigator.planner());
     for (int x = 0; x <= 600; x += 100) planner.addExtra({(float)x, 100});
-    TEST_ASSERT_FALSE(navigator.reposition({300, -80, math::PI / 2}, 1));
-    TEST_ASSERT_EQUAL_INT(7, navigator.unmappedBlocks());
-    TEST_ASSERT_EQUAL_INT(0, navigator.path().n);
-    TEST_ASSERT_FALSE(navigator.reposition({300, -80, math::PI / 2}, 2));
-    TEST_ASSERT_EQUAL_INT(7, navigator.unmappedBlocks());
+    TEST_ASSERT_TRUE(navigator.reposition({300, -80, math::PI / 2}, 1));
+    TEST_ASSERT_EQUAL_INT(0, navigator.unmappedBlocks());
+    TEST_ASSERT_TRUE(navigator.path().n > 1);
 }
 
 void test_encoder_only_odometry() {
@@ -122,6 +132,19 @@ void test_snapshot_rejects_stale_missing_and_invalid_data() {
     TEST_ASSERT_EQUAL((int)Fault::Sensor, (int)s.issue(251, 6, true, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
 }
 
+void test_raised_age_limit_allows_one_planning_stall() {
+    SensorSnapshot<cfg::TOF_COUNT> s;
+    s.now = s.gyroAt = s.completedAt = 100;
+    s.dt = 0.2f;  // a step that included a 150 ms replan
+    s.gyroSamples = 6;
+    for (auto& range : s.ranges) range = {300, 100, RangeStatus::Valid, 0};
+    TEST_ASSERT_EQUAL((int)Fault::Timing, (int)s.issue(300, 7, true, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
+    s.maxAgeMs = 500;
+    TEST_ASSERT_EQUAL((int)Fault::None, (int)s.issue(300, 7, true, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
+    s.dt = 0.6f;  // still faults when the stall is longer than the raised limit
+    TEST_ASSERT_EQUAL((int)Fault::Timing, (int)s.issue(300, 7, true, true, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM));
+}
+
 void test_encoder_gap_limit_and_recovery_wrap() {
     TEST_ASSERT_TRUE(encoderGapSafe(12, 0.24f, 622));
     TEST_ASSERT_FALSE(encoderGapSafe(13, 0.24f, 622));
@@ -138,12 +161,14 @@ void test_encoder_gap_limit_and_recovery_wrap() {
 
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_lease_can_be_extended_for_one_blocking_job);
     RUN_TEST(test_freshness_and_lease_wrap);
     RUN_TEST(test_recovery_requires_continuous_health_and_stationarity);
     RUN_TEST(test_no_path_never_commands_motion);
-    RUN_TEST(test_failed_replan_clears_old_route_and_preserves_obstacles);
+    RUN_TEST(test_detected_blocks_that_seal_the_route_are_dropped);
     RUN_TEST(test_encoder_only_odometry);
     RUN_TEST(test_snapshot_rejects_stale_missing_and_invalid_data);
+    RUN_TEST(test_raised_age_limit_allows_one_planning_stall);
     RUN_TEST(test_encoder_gap_limit_and_recovery_wrap);
     return UNITY_END();
 }

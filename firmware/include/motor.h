@@ -24,6 +24,7 @@ public:
     void setTarget(float mmPerSec);
     void tick();             // speed-loop interrupt; samples the hardware encoder
     int32_t takeCounts();    // main loop; independent odometry counter history
+    float speed() const { return controller_.speed(); }  // filtered wheel speed, mm/s
 
 private:
     void setDuty(float duty);  // internal PWM output, clamped to [-1, 1]
@@ -49,7 +50,11 @@ void motorInit();
 void motorEnable(bool on);
 // Publish both targets and refresh the lease atomically; ignored while disabled.
 void motorSetTargets(float vLeft, float vRight);  // mm/s, forward positive
+// Keep the last command alive for `ms` (instead of the usual 150 ms) before a blocking job such as a route plan. The next
+// motorSetTargets() restores the normal lease. Ignored while disabled.
+void motorExtendLease(uint32_t ms);
 void motorTick();                                  // once per speed loop period (interrupt context)
+void motorSpeeds(float* left, float* right);          // filtered wheel speeds, mm/s (for the run log)
 void motorTakeCounts(int32_t* left, int32_t* right);  // counts since the last call, from the hardware counters
 
 uint32_t motorCommandExpiries();

@@ -8,7 +8,7 @@
 #include "stm32f1xx_hal.h"
 
 extern I2C_HandleTypeDef hi2c1;
-extern UART_HandleTypeDef huart1;  // PA9/PA10, HC-05 or wired; owned by remote.h after boardInit()
+extern UART_HandleTypeDef huart1;  // PA9/PA10, wired adapter; printf output (syscalls.cpp)
 extern TIM_HandleTypeDef htim1;  // motor PWM (CH1N = motor B, CH2N = motor A)
 extern TIM_HandleTypeDef htim2;  // left encoder (hardware quadrature)
 extern TIM_HandleTypeDef htim3;  // right encoder (hardware quadrature)

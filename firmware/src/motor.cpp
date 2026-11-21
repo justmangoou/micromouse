@@ -80,18 +80,19 @@ reliability::CommandLease gLease;
 volatile uint32_t gExpiries = 0;
 volatile bool gEnabled = false;
 
-speed_control::SpeedController makeController() {
+// The feed-forward uses the motor's own gain and start-up duty (cfg::MOTOR_FF_*), not the navigation speed scale V_FULL_MM_S.
+speed_control::SpeedController makeController(float ffMmPerS, float ffOffset) {
     return speed_control::SpeedController(
-        cfg::V_FULL_MM_S, cfg::MM_PER_COUNT, cfg::SPEED_LOOP_DT_S,
+        ffMmPerS, cfg::MM_PER_COUNT, cfg::SPEED_LOOP_DT_S,
         speed_control::Pid(cfg::SPEED_KP, cfg::SPEED_KI, 0.0f, 200.0f, cfg::SPEED_CORR_LIMIT),
-        cfg::SPEED_TARGET_DEADBAND_MM_S);
+        cfg::SPEED_TARGET_DEADBAND_MM_S, cfg::SPEED_FILTER_ALPHA, cfg::SPEED_WINDOW_TICKS, ffOffset);
 }
 
 // Motor A (left): PWMA = TIM1_CH2N. Motor B (right): PWMB = TIM1_CH1N.
 Motor gLeft(&htim1, TIM_CHANNEL_2, MOTOR_A_IN1_PORT, MOTOR_A_IN1_PIN, MOTOR_A_IN2_PORT, MOTOR_A_IN2_PIN, &htim2,
-            makeController(), cfg::MOTOR_SIGN_L, cfg::ENC_SIGN_L);
+            makeController(cfg::MOTOR_FF_MM_S_L, cfg::MOTOR_FF_OFFSET_L), cfg::MOTOR_SIGN_L, cfg::ENC_SIGN_L);
 Motor gRight(&htim1, TIM_CHANNEL_1, MOTOR_B_IN1_PORT, MOTOR_B_IN1_PIN, MOTOR_B_IN2_PORT, MOTOR_B_IN2_PIN, &htim3,
-             makeController(), cfg::MOTOR_SIGN_R, cfg::ENC_SIGN_R);
+             makeController(cfg::MOTOR_FF_MM_S_R, cfg::MOTOR_FF_OFFSET_R), cfg::MOTOR_SIGN_R, cfg::ENC_SIGN_R);
 
 }  // namespace
 
@@ -128,6 +129,13 @@ void motorSetTargets(float vLeft, float vRight) {
     __set_PRIMASK(irqState);
 }
 
+void motorExtendLease(uint32_t ms) {
+    const uint32_t irqState = __get_PRIMASK();
+    __disable_irq();
+    if (gEnabled) gLease.extend(HAL_GetTick(), ms);
+    __set_PRIMASK(irqState);
+}
+
 void motorTick() {
     if (gEnabled && gLease.expired(HAL_GetTick())) {
         motorEnable(false);
@@ -139,6 +147,11 @@ void motorTick() {
 
 uint32_t motorCommandExpiries() { return gExpiries; }
 bool motorsEnabled() { return gEnabled; }
+
+void motorSpeeds(float* left, float* right) {
+    *left = gLeft.speed();
+    *right = gRight.speed();
+}
 
 void motorTakeCounts(int32_t* left, int32_t* right) {
     *left = gLeft.takeCounts();

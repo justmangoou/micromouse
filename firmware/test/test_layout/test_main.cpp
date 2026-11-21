@@ -43,7 +43,9 @@ void test_layout_validation() {
 void test_course_accepts_one_sensor_and_one_ray() {
     auto value = layout();
     value.count = 1;
-    static nav::Navigator car(value);
+    nav::NavParams params;
+    params.unmappedMinX = 0.0f;  // this test places the unmapped block near the start, in the region that is normally mapped
+    static nav::Navigator car(value, params);
     car.init(nullptr, 0);
     TEST_ASSERT_TRUE(car.configurationValid());
     TEST_ASSERT_TRUE(car.start({300, -80, math::PI/2}, 0));

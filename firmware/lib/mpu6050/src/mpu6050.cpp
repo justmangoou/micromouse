@@ -5,6 +5,7 @@
 #include "mpu6050.h"
 #include "math_util.h"
 
+#include <cmath>
 #include <optional>
 
 namespace {
@@ -58,15 +59,22 @@ bool Mpu6050::init() {
     return true;
 }
 
-bool Mpu6050::calibrateGyroZ(uint16_t samples, uint32_t samplePeriodMs) {
+bool Mpu6050::calibrateGyroZ(uint16_t samples, uint32_t samplePeriodMs, float maxStd, float maxBias) {
     if (!initialized_ || samples == 0 || samplePeriodMs < 5) return false;
-    float mean = 0.0f;
+    const uint32_t start = HAL_GetTick();
+    const uint32_t limitMs = 2u * samples * samplePeriodMs + 500u;
+    float mean = 0.0f, m2 = 0.0f;  // Welford running mean and sum of squared deviations
     for (uint32_t i = 0; i < samples; i++) {
         if (i > 0) HAL_Delay(samplePeriodMs);
+        if (HAL_GetTick() - start > limitMs) return false;
         auto sample = readRawGyroZ();
         if (!sample) return false;
-        mean += (*sample - mean) / static_cast<float>(i + 1);
+        const float delta = *sample - mean;
+        mean += delta / static_cast<float>(i + 1);
+        m2 += delta * (*sample - mean);
     }
+    if (maxStd > 0.0f && samples > 1 && std::sqrt(m2 / static_cast<float>(samples - 1)) > maxStd) return false;
+    if (maxBias > 0.0f && std::fabs(mean) > maxBias) return false;
     gyroBiasZ_ = mean;
     return true;
 }

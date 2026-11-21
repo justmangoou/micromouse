@@ -1,7 +1,6 @@
 /**
  * @file    main.cpp
- * @brief   Start-up and sensor loop shared by the run modes. The mode itself is course.cpp (block course, A*) or
- *          manual.cpp (host-driven wheels); platformio.ini builds one of them per environment.
+ * @brief   Start-up and sensor loop shared by the run modes. The mode itself is course.cpp (block course, A*).
  *
  * @par Flow
  *   power on -> sensors up -> gyro calibration (keep the robot still) -> runMode(): wait for the button, then run at
@@ -15,7 +14,6 @@
 #include "i2c_bus.h"
 #include "motor.h"
 #include "mpu6050.h"
-#include "remote.h"
 #include "robot.h"
 
 namespace {
@@ -27,8 +25,8 @@ StartupStatus gStartup;
 uint32_t gLastGyro = 0;
 uint32_t gLastRecovery = 0;
 bool gLoopStarted = false;
+bool gStalled = false;  // a plan just blocked the loop: the next step gets cfg::STALL_MAX_AGE_MS
 uint32_t gNextGyro, gNextStep, gLastStep;  // HAL ticks, ms
-uint32_t gLastTelemetry = 0;
 nav::GyroBiasTracker gBiasTracker(cfg::GYRO_BIAS);
 
 bool due(uint32_t now, uint32_t at) { return static_cast<int32_t>(now - at) >= 0; }  // wrap-safe
@@ -64,6 +62,8 @@ void waitStep(SensorStep& step) {
         }
     }
     step.now = HAL_GetTick();
+    step.maxAgeMs = gStalled ? cfg::STALL_MAX_AGE_MS : reliability::MAX_AGE_MS;
+    gStalled = false;
     step.dt = (step.now - gLastStep) * 0.001f;
     gLastStep = step.now;
     motorTakeCounts(&step.countsL, &step.countsR);
@@ -91,8 +91,14 @@ int main() {
     printf("\r\nimu %s, tof %d/%d up\r\ngyro calibration: keep the robot still\r\n", status.imuOk ? "ok" : "FAILED",
            status.tofUp, TOF_COUNT);
 
+    // Two seconds to take your hands off and let the chip settle; the LED blinks, then stays on during the calibration.
+    for (uint32_t t = 0; t < cfg::GYRO_SETTLE_MS; t += 100) {
+        ledStatusSet((t / 200) % 2 == 0);
+        HAL_Delay(100);
+    }
     ledStatusSet(true);
-    status.calibrated = status.imuOk && gImu.calibrateGyroZ(cfg::GYRO_CALIBRATION_SAMPLES, cfg::GYRO_PERIOD_MS);
+    status.calibrated = status.imuOk && gImu.calibrateGyroZ(cfg::GYRO_CALIBRATION_SAMPLES, cfg::GYRO_PERIOD_MS,
+                                                             cfg::GYRO_CAL_MAX_STD_RAD_S, cfg::GYRO_CAL_MAX_BIAS_RAD_S);
     printf("gyro calibration %s, bias %d mdeg/s\r\n", status.calibrated ? "ok" : "FAILED",
            (int)(cfg::GYRO_SIGN * gImu.gyroBiasZ() * 57295.78f));
 
@@ -112,12 +118,14 @@ bool updateOdometry(nav::FusedOdometry& odo, const SensorStep& s) {
     if (!reliability::encoderGapSafe(s.dt, cfg::MM_PER_COUNT, cfg::V_FULL_MM_S)) return false;
     if (s.dt > 0) {
         if (s.gyroSamples && std::isfinite(s.gyro) && reliability::fresh(s.completedAt, s.gyroAt) &&
-            s.dt <= reliability::MAX_AGE_MS * 0.001f)
+            s.dt <= s.maxAgeMs * 0.001f)
             odo.update(s.countsL, s.countsR, s.gyro, s.dt);
         else odo.updateEncoders(s.countsL, s.countsR, s.dt);
     }
     return std::isfinite(odo.pose.x) && std::isfinite(odo.pose.y) && std::isfinite(odo.pose.th);
 }
+
+void noteStall() { gStalled = true; }
 
 bool recoverSensors(const SensorStep& s) {
     static reliability::Qualification stationary;
@@ -135,35 +143,13 @@ bool recoverSensors(const SensorStep& s) {
     if (tofRetry) gStartup.tofUp = tofInit(gI2c);
     // Retry startup calibration only; retain an established bias across outages.
     if (calibrationRetry && gStartup.imuOk)
-        gStartup.calibrated = gImu.calibrateGyroZ(cfg::GYRO_CALIBRATION_SAMPLES, cfg::GYRO_PERIOD_MS);
+        gStartup.calibrated = gImu.calibrateGyroZ(cfg::GYRO_CALIBRATION_SAMPLES, cfg::GYRO_PERIOD_MS,
+                                                     cfg::GYRO_CAL_MAX_STD_RAD_S, cfg::GYRO_CAL_MAX_BIAS_RAD_S);
     stationary.reset();
     return true;  // Caller must collect a new snapshot before qualifying recovery.
 }
 
-RemoteCommands pollRemote() {
-    RemoteCommands commands;
-    comms::Packet p;
-    while (remoteReceive(p)) {
-        switch (p.type) {
-            case comms::Type::Start: commands.start = true; break;
-            case comms::Type::Stop: commands.stop = true; break;
-            case comms::Type::Ping: break;
-            case comms::Type::Drive:
-                // Streamed at 10 Hz or more: no acknowledgement, telemetry shows the effect.
-                if (comms::unpackDrive(p, commands.left, commands.right)) commands.drive = true;
-                continue;
-            default: continue;  // not a command: no acknowledgement
-        }
-        const uint8_t ack[comms::ACK_SIZE] = {static_cast<uint8_t>(p.type), p.seq};
-        remoteSend(comms::Type::Ack, ack, sizeof(ack));
-    }
-    return commands;
-}
-
-static_assert(TOF_COUNT == comms::TELEMETRY_RANGES, "telemetry carries one range per ToF sensor");
-
-void reportRuntime(const reliability::Supervisor& supervisor, const SensorStep& s, const nav::FusedOdometry& odo,
-                   const float target[2]) {
+void reportRuntime(const reliability::Supervisor& supervisor, const SensorStep& s) {
     if (gRuntime.state != supervisor.state() || gRuntime.fault != supervisor.fault()) {
         printf("state %u fault %u\r\n", (unsigned)supervisor.state(), (unsigned)supervisor.fault());
     }
@@ -177,23 +163,4 @@ void reportRuntime(const reliability::Supervisor& supervisor, const SensorStep& 
         gRuntime.rangeTime[i] = s.ranges[i].timestamp;
         gRuntime.rangeFailures[i] = s.ranges[i].failures;
     }
-
-    if (s.completedAt - gLastTelemetry < cfg::TELEMETRY_PERIOD_MS) return;
-    gLastTelemetry = s.completedAt;
-    comms::Telemetry t;
-    t.ms = s.completedAt;
-    t.x = odo.pose.x;
-    t.y = odo.pose.y;
-    t.th = odo.pose.th;
-    t.v = odo.v;
-    t.target[0] = target[0];
-    t.target[1] = target[1];
-    for (int i = 0; i < TOF_COUNT; ++i) {
-        t.range[i] = s.tof[i];
-        if (s.ranges[i].status == reliability::RangeStatus::Valid) t.validRanges |= 1u << i;
-    }
-    t.state = static_cast<uint8_t>(supervisor.state());
-    t.fault = static_cast<uint8_t>(supervisor.fault());
-    uint8_t payload[comms::TELEMETRY_SIZE];
-    remoteSend(comms::Type::Telemetry, payload, comms::pack(t, payload));
 }

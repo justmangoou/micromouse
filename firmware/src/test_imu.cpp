@@ -1,6 +1,6 @@
 /**
- * @file    imu_test.cpp
- * @brief   Stationary MPU6050 check (env:imu_test). Probes the chip, calibrates the gyro bias (keep the board still
+ * @file    test_imu.cpp
+ * @brief   Stationary MPU6050 check (env:test_imu). Probes the chip, calibrates the gyro bias (keep the board still
  *          for about 2 s), then prints at 10 Hz as plain text for `pio device monitor`: yaw rate in deg/s and the
  *          yaw angle integrated from it. Rotate the board by hand: yaw should follow, and sit still at rest (slow
  *          drift = bias). The same numbers are in gImuTest for ST-Link. Fast status LED blink = chip not found.

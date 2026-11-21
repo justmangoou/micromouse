@@ -1,6 +1,6 @@
 /**
- * @file    motor_test.cpp
- * @brief   Open-loop motor, encoder and button check (env:motor_test). No I2C, no HC-05, no speed loop. Wheels off the
+ * @file    test_motor.cpp
+ * @brief   Open-loop motor, encoder and button check (env:test_motor). No I2C, no speed loop. Wheels off the
  *          ground. Write gMotorTest.dutyA / dutyB (per mille, -1000..1000; A = left, B = right) and gMotorTest.runMs
  *          through ST-Link; both motors run for runMs and then stop on their own. The encoder counts (signed, since
  *          start) and the button levels are always live. The status LED blinks while idle and stays on while running.

@@ -57,6 +57,12 @@ constexpr float TOF_ANGLE_DEG[TOF_COUNT] = {-45.0f, 0.0f, 45.0f};
 constexpr float TOF_MOUNT_MM[TOF_COUNT][2] = {{60.0f, -30.0f}, {65.0f, 0.0f}, {60.0f, 30.0f}};
 constexpr int TOF_FOV_RAYS = 5;
 constexpr float TOF_FOV_DEG[TOF_FOV_RAYS] = {-12.0f, -6.0f, 0.0f, 6.0f, 12.0f};
+// Per-sensor range offset in micrometres, from env:test_tof_cal (target at a known distance). TOF_OFFSET_UNSET keeps the
+// sensor's factory offset.
+constexpr int32_t TOF_OFFSET_UNSET = INT32_MIN;
+// Calibrated 2026-11-21 with a flat card at 100 mm (R1, F, L1): 50/50 valid readings each, mean 99/99/99 mm.
+// R1 and L1 were also checked at 300 mm (299 and 300). F was replaced and recalibrated: its offset belongs to that unit.
+constexpr int32_t TOF_OFFSET_UM[TOF_COUNT] = {31000, 38000, 34000};
 constexpr float TOF_MIN_MM = 30.0f;
 constexpr float TOF_MAX_MM = 1200.0f;
 
@@ -76,20 +82,18 @@ constexpr tof::Layout makeTofLayout() {
 }
 constexpr tof::Layout TOF_LAYOUT = makeTofLayout();
 
-// USART1 PA9/PA10: comms packets (remote.h) to an HC-05 or a wired adapter; printf travels as Log packets.
-// 9600 is the HC-05 factory baud; if you change the module with AT+UART, change this to match.
-constexpr uint32_t UART1_BAUD_RATE = 9600;
-constexpr uint32_t TELEMETRY_PERIOD_MS = 100;  // ~30 bytes per packet: 10 Hz fits in a third of 9600 baud
+// USART1 PA9/PA10: printf text to a wired USB-serial adapter (transmit only).
+constexpr uint32_t UART1_BAUD_RATE = 115200;
 
-constexpr float WHEEL_RADIUS_MM = 16.0f;
-constexpr float WHEEL_TRACK_MM  = 90.0f;   // wheel separation
-constexpr float COUNTS_PER_REV  = 420.0f;  // x4 hardware counts per wheel revolution (after the gearbox); measure on the robot
+constexpr float WHEEL_RADIUS_MM = 16.5f;   // measured: 33 mm wheel diameter
+constexpr float WHEEL_TRACK_MM  = 82.0f;   // measured: wheel separation
+constexpr float COUNTS_PER_REV  = 270.0f;  // measured by hand over 10 turns: left 271.2, right 269.7 (x4 counts per wheel revolution)
 constexpr float MM_PER_COUNT    = 2.0f * math::PI * WHEEL_RADIUS_MM / COUNTS_PER_REV;
 
 // Direction fixes found during bring-up: +1 or -1 so that "forward" counts up and drives forward.
-constexpr int ENC_SIGN_L   = 1;
+constexpr int ENC_SIGN_L   = -1;  // bench: left motor is mounted reversed, so forward counts down on the raw left encoder
 constexpr int ENC_SIGN_R   = -1;  // found on the bench: motor B forward counts down on the right encoder
-constexpr int MOTOR_SIGN_L = 1;
+constexpr int MOTOR_SIGN_L = -1;  // bench: a positive command to motor A turns the left wheel backward
 constexpr int MOTOR_SIGN_R = 1;
 constexpr float GYRO_SIGN  = 1.0f;       // +1 when positive gyro-z is a CCW (left) turn
 // Gyro scale error (the MPU6050's is up to +-3 %, which is 2.7 deg on a 90 deg turn). Spin in place for 10 turns
@@ -114,10 +118,22 @@ constexpr float V_FULL_MM_S = 622.0f;      // wheel speed at full duty, mm/s (me
 
 // Wheel speed loop: duty = feed-forward (target / V_FULL) + PID on the speed error. Gains are a starting
 // point only; tune on the car.
-constexpr float SPEED_KP = 0.0004f;      // duty per mm/s
-constexpr float SPEED_KI = 0.002f;
+// Motor model measured with src/test_step.cpp, 2026-11-21 (on the floor, 0.15-0.35 duty): speed = gain * (duty - offset), so
+// the feed-forward is target / gain + offset. The wheels-off gain is ~2900; V_FULL_MM_S above is only the navigation's speed
+// scale and was 4.5x too low as a feed-forward, which left the PID saturated at its limit all run (the wobble).
+// The right wheel is ~3% faster at the same duty, hence the separate values.
+constexpr float MOTOR_FF_MM_S_L = 2725.0f, MOTOR_FF_MM_S_R = 2690.0f;  // mm/s per unit duty
+constexpr float MOTOR_FF_OFFSET_L = 0.068f, MOTOR_FF_OFFSET_R = 0.065f; // duty at which the wheel just starts to move
+// Gains from a host simulation of that plant (loaded response time 0.1-0.2 s): speed error 122 -> ~45 mm/s RMS on a 300/150/350 mm/s
+// step sequence. The old 0.001 / 0.01 were chosen against a feed-forward that was 4.5x off.
+constexpr float SPEED_KP = 0.0006f;      // duty per mm/s
+constexpr float SPEED_KI = 0.003f;       // duty per mm/s per second; the integral term is limited to SPEED_CORR_LIMIT (pid.h)
 constexpr float SPEED_CORR_LIMIT = 0.3f;
 constexpr float SPEED_TARGET_DEADBAND_MM_S = 10.0f;  // PID bypass below this target magnitude; feed-forward remains
+// One encoder count per 5 ms tick is 77 mm/s, so the raw speed is a staircase and Kp turns each step into a duty jump
+// (the wiggle). Average the counts over 4 ticks (19 mm/s per count), then filter lightly.
+constexpr int SPEED_WINDOW_TICKS = 4;
+constexpr float SPEED_FILTER_ALPHA = 0.5f;
 
 // Timing
 constexpr unsigned SPEED_LOOP_HZ = 200;     // wheel speed loop: one TIM4 interrupt per period (board.cpp)
@@ -125,10 +141,14 @@ constexpr float SPEED_LOOP_DT_S = 1.0f / SPEED_LOOP_HZ;
 constexpr unsigned CONTROL_PERIOD_MS = 33;  // ToF timing budget, navigation and odometry step
 constexpr unsigned GYRO_PERIOD_MS = 5;      // gyro read, averaged over each control step
 constexpr uint16_t GYRO_CALIBRATION_SAMPLES = 400; // ~2 s stationary at 200 Hz
+constexpr uint32_t GYRO_SETTLE_MS = 2000;   // after power-on: hands off and let the chip settle before calibrating
+// The calibration is rejected (and retried while the robot stands still) if the samples spread more than this (the robot
+// was touched or moving) or the offset is larger than a gyro's plausible zero-rate error.
+constexpr float GYRO_CAL_MAX_STD_RAD_S = 0.01f;   // 0.6 deg/s; a still MPU6050 is ~0.002
+constexpr float GYRO_CAL_MAX_BIAS_RAD_S = 0.1f;   // 5.7 deg/s
 constexpr float RUN_TIME_LIMIT_S = 240.0f;
-
-// Manual mode (env:manual): wheel speeds come from the host's Drive packets.
-constexpr float MANUAL_MAX_MM_S = 300.0f;        // clamp on each wheel; raise it once the robot is on the floor and tuned
-constexpr uint32_t MANUAL_TIMEOUT_MS = 300;      // wheels stop when no Drive packet arrives for this long
+// A replan runs the planner inside one control step. On the F103 (no FPU) that blocks the loop for ~150 ms, so the step
+// after it may be this old before it counts as a timing fault. Only the course mode raises the limit, and only then.
+constexpr uint32_t STALL_MAX_AGE_MS = 500;
 
 }  // namespace cfg

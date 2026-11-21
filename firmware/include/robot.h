@@ -1,6 +1,6 @@
 /**
  * @file    robot.h
- * @brief   What main.cpp shares with the navigation mode it was built with (course.cpp or manual.cpp): the start-up
+ * @brief   What main.cpp shares with the navigation mode it was built with (course.cpp): the start-up
  *          result and a sensor loop that hands over one control step at a time.
  */
 #pragma once
@@ -45,16 +45,9 @@ extern volatile RuntimeStatus gRuntime;
 reliability::Fault sensorIssue(const SensorStep& step, unsigned requiredMask, bool initialStart = true);
 bool updateOdometry(nav::FusedOdometry& odo, const SensorStep& step);
 bool recoverSensors(const SensorStep& step);
+// Call after a long blocking computation (a route plan): the next step may be older than the usual limit without
+// being a timing fault.
+void noteStall();
 
-// Host commands received since the last call (remote.h); each one is acknowledged.
-struct RemoteCommands {
-    bool start = false;  // treat like a button press
-    bool stop = false;   // end the run: Supervisor::done(), motors off
-    bool drive = false;  // a Drive packet arrived; left/right are the latest (mm/s), unclamped
-    float left = 0, right = 0;
-};
-RemoteCommands pollRemote();
-
-// Updates gRuntime and sends telemetry every cfg::TELEMETRY_PERIOD_MS. target: wheel targets this step, mm/s.
-void reportRuntime(const reliability::Supervisor& supervisor, const SensorStep& step, const nav::FusedOdometry& odo,
-                   const float target[2]);
+// Updates gRuntime and prints state/fault changes.
+void reportRuntime(const reliability::Supervisor& supervisor, const SensorStep& step);

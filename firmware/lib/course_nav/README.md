@@ -26,3 +26,22 @@ Firmware tuning/start/finish settings live in `src/course.cpp`, the stored map i
 `include/map_data.h`, and sensor geometry/wiring in `include/config.h`.
 Build with `pio run -e course_nav`; run host logic tests with
 `pio test -e native`.
+
+## Memory profiles
+
+The planner is all static memory. Two profiles, chosen at compile time:
+
+| | default | `-DNAV_LOW_MEMORY` |
+|---|---|---|
+| Grid | 20 mm cells (91 x 71) | 40 mm cells (46 x 36) |
+| Path / coarse path / open list | 420 / 400 / 1024 | 200 / 160 / 200 |
+| Path spacing, clearance sample spacing | 15 mm, 10 mm | 20 mm, 20 mm |
+| Speed profile | every path point | every second point, interpolated |
+| RAM (planner + path) | ~46 KB | ~13 KB |
+
+The default matches `sim/course/planner.py`. The low-memory profile is what `env:course_nav` builds for the Blue Pill
+(20 KB RAM, no FPU); it has the same algorithm on a coarser grid. `pio test -e native` and `pio test -e native_lowmem`
+run the same host tests against both. On the Blue Pill a route plan takes about 145 ms and blocks the control loop for
+that long (`src/course.cpp` handles the step that replans: see `noteStall()` in `include/robot.h`); a normal navigator
+step takes under 20 ms. `env:test_planner` measures this on the board.
+

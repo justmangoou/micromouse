@@ -28,6 +28,7 @@ struct SensorSnapshot {
     float dt = 0;
     float gyro = 0;
     unsigned gyroSamples = 0;
+    uint32_t maxAgeMs = MAX_AGE_MS;  // freshness limit; raised only for the step after the planner blocked the loop
     RangeReading ranges[Count];
 
     Fault issue(uint32_t at, unsigned requiredMask, bool initialized, bool calibrated, float minMm, float maxMm) const {
@@ -35,14 +36,14 @@ struct SensorSnapshot {
             if (requiredMask >> Count) return Fault::Configuration;
         }
         if (!std::isfinite(minMm) || !std::isfinite(maxMm) || minMm < 0 || maxMm <= minMm) return Fault::Configuration;
-        if (!std::isfinite(dt) || dt <= 0 || dt > MAX_AGE_MS * 0.001f ||
-            !fresh(at, now) || !fresh(at, completedAt)) return Fault::Timing;
-        if (!initialized || !calibrated || !gyroSamples || !std::isfinite(gyro) || !fresh(at, gyroAt))
+        if (!std::isfinite(dt) || dt <= 0 || dt > maxAgeMs * 0.001f ||
+            !fresh(at, now, maxAgeMs) || !fresh(at, completedAt, maxAgeMs)) return Fault::Timing;
+        if (!initialized || !calibrated || !gyroSamples || !std::isfinite(gyro) || !fresh(at, gyroAt, maxAgeMs))
             return Fault::Sensor;
         for (std::size_t i = 0; i < Count; ++i) {
             const auto& r = ranges[i];
             if ((requiredMask & (1u << i)) && (r.status != RangeStatus::Valid ||
-                !fresh(at, r.timestamp) || !std::isfinite(r.mm) || r.mm < minMm || r.mm >= maxMm))
+                !fresh(at, r.timestamp, maxAgeMs) || !std::isfinite(r.mm) || r.mm < minMm || r.mm >= maxMm))
                 return Fault::Sensor;
         }
         return Fault::None;
@@ -107,11 +108,14 @@ private:
 // The motor owner publishes commands and this lease under the same IRQ lock.
 class CommandLease {
 public:
-    void publish(uint32_t now) { at_ = now; active_ = true; }
+    void publish(uint32_t now) { at_ = now; ttl_ = MAX_AGE_MS; active_ = true; }
+    // Hold the command longer than usual for one blocking job (a route plan): the motors keep the last command for `ttl` ms.
+    void extend(uint32_t now, uint32_t ttl) { at_ = now; ttl_ = ttl; active_ = true; }
     void clear() { active_ = false; }
-    bool expired(uint32_t now) const { return active_ && now - at_ >= MAX_AGE_MS; }
+    bool expired(uint32_t now) const { return active_ && now - at_ >= ttl_; }
 private:
     uint32_t at_ = 0;
+    uint32_t ttl_ = MAX_AGE_MS;
     bool active_ = false;
 };
 }

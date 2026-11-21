@@ -20,7 +20,10 @@ public:
     // Blocking calibration: keep the robot stationary for the entire sample window.
     // A failed read aborts and preserves the previous offset. Samples are >=5 ms
     // apart to match the configured 200 Hz sample rate. Call after init().
-    bool calibrateGyroZ(uint16_t samples = 400, uint32_t samplePeriodMs = 5);
+    // The calibration is capped: it gives up (keeping the previous offset) if it takes more than twice the sample window
+    // plus 0.5 s (a stalled bus), if the samples spread more than maxStd rad/s (the robot was moving), or if the mean
+    // is beyond +-maxBias rad/s (not a plausible offset). 0 disables that check.
+    bool calibrateGyroZ(uint16_t samples = 400, uint32_t samplePeriodMs = 5, float maxStd = 0.0f, float maxBias = 0.0f);
     float gyroBiasZ() const { return gyroBiasZ_; }  // sensor-frame rad/s
     // Nudge the offset while the robot stands still (see nav::GyroBiasTracker).
     void adjustGyroBiasZ(float delta) { gyroBiasZ_ += delta; }

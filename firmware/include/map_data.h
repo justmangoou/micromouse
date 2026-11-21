@@ -13,10 +13,10 @@ constexpr float MAP_BLOCKS[MAP_BLOCK_COUNT][3] = {
     {450.00f, 1150.00f, 0.0000f},
     {650.00f, 750.00f, 0.0000f},
     {750.00f, 650.00f, 0.0000f},
-    {850.00f, 1000.00f, 0.0000f},
+    {850.00f, 990.00f, 0.0000f},  // T11: course says 1000; moved 10 mm down so the path keeps off its lower-left corner (hit on the real course)
     {950.00f, 650.00f, 0.0000f},
     {1150.00f, 1150.00f, 0.0000f},
-    {1250.00f, 850.00f, 0.0000f},
+    {1250.00f, 850.00f, 0.0000f},  // T14 (the 20 mm shift was removed 2026-11-21: the physical block was 5 cm too low, now moved back)
     {1450.00f, 450.00f, 0.0000f},
     {1450.00f, 150.00f, 0.0000f},
     {1750.00f, 250.00f, 0.0000f}

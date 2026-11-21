@@ -1,7 +1,7 @@
 /**
  * @file    planner.h
  * @brief   Global planner: clearance-weighted A* on a 20 mm grid, string pulling, corner smoothing, resampling. Port
- *          of AStarDriver._plan in sim/course/planner.py. All memory is static (~36 KB), no allocation.
+ *          of AStarDriver._plan in sim/course/planner.py. All memory is static (~36 KB, or ~10 KB with NAV_LOW_MEMORY), no allocation.
  */
 #pragma once
 
@@ -11,20 +11,36 @@
 
 namespace nav {
 
-constexpr float GRID_RES = 20.0f;      // grid cell, mm
-constexpr int GRID_NX = 91;           // x = 0 .. 1800 mm
-constexpr int GRID_NY = 71;           // y = -200 .. 1200 mm
-constexpr int GRID_CELLS = GRID_NX * GRID_NY;
-constexpr int MAX_MAP = 24;       // mapped (static) blocks
-constexpr int MAX_EXTRA = 8;      // unmapped blocks found by the ToF at run time
-constexpr int MAX_PATH = 420;     // 15 mm spacing -> 6300 mm
+// Memory profile. The default is the full-resolution planner that matches sim/course/planner.py (~46 KB with the
+// navigator's path). A target with 20 KB of RAM (the Blue Pill) builds with -DNAV_LOW_MEMORY: 40 mm cells, shorter path
+// and open list, ~13 KB. Same algorithm, coarser grid; the string pulling and smoothing recover most of the resolution.
+#ifdef NAV_LOW_MEMORY
+constexpr float GRID_RES = 40.0f;     // grid cell, mm
+constexpr int MAX_PATH = 200;         // PATH_STEP spacing -> 4000 mm
+constexpr int MAX_COARSE = 128;
+constexpr int HEAP_CAP = 200;
+constexpr float PATH_STEP = 20.0f;
+constexpr float CHECK_STEP = 20.0f;   // spacing of the clearance samples along a shortcut (blocks are 100 mm wide)
+constexpr int PROFILE_STRIDE = 2;     // speed profile: clearance and edge terms at every 2nd path point, interpolated
+#else
+constexpr float GRID_RES = 20.0f;     // grid cell, mm
+constexpr int MAX_PATH = 420;         // 15 mm spacing -> 6300 mm
 constexpr int MAX_COARSE = 400;
 // Open-list entries. The longest search in the host tests (unmapped blocks, replanning) peaks at 104, so this is
 // ~10x headroom. When it fills, new entries are dropped, which can only cost path optimality.
 constexpr int HEAP_CAP = 1024;
+constexpr float PATH_STEP = 15.0f;
+constexpr float CHECK_STEP = 10.0f;
+constexpr int PROFILE_STRIDE = 1;
+#endif
+constexpr int GRID_NX = static_cast<int>(1800.0f / GRID_RES) + 1;  // x = 0 .. 1800 mm
+constexpr int GRID_NY = static_cast<int>(1400.0f / GRID_RES) + 1;  // y = -200 .. 1200 mm
+constexpr int GRID_CELLS = GRID_NX * GRID_NY;
+constexpr int MAX_MAP = 24;       // mapped (static) blocks
+constexpr int MAX_EXTRA = 8;      // unmapped blocks found by the ToF at run time
 
-constexpr float R_ROBOT = 70.0f;   // min clearance from a block surface for the centre line
-constexpr float R_PRUNE = 90.0f;   // shortcuts must keep this much clearance
+constexpr float R_ROBOT = 90.0f;   // min clearance from a block surface for the centre line
+constexpr float R_PRUNE = 110.0f;   // shortcuts must keep this much clearance
 // Stay this far inside the tape. A wheel sits track/2 + wheel_half_w = 50 mm off the centreline, so this must
 // clear that plus *real* margin for dead-reckoning drift, not just a few mm. But the 600 mm-wide corridor (with
 // R_ROBOT clearance from obstacles also eating into it) cannot support a static margin that covers the full drift
@@ -36,10 +52,9 @@ constexpr float EDGE_SLOW_START = 220.0f;  // mm of edge margin at which the spe
 constexpr float DISC_R = 110.0f;    // an unmapped block is a disc around its estimated centre. Bigger than the
                                     // block's own 50 mm half-width: the single-ray near-face + half-block-behind
                                     // centre estimate is biased for oblique hits, so this buys back margin for that
-constexpr float PATH_STEP = 15.0f;
 constexpr float CENTERING = 6.0f;
 
-constexpr math::Vec2 GOAL = {1500.0f, -120.0f};
+constexpr math::Vec2 GOAL = {1320.0f, -120.0f};  // only the straight-line fallback; A* ends anywhere on the finish line
 
 struct Path {
     math::Vec2 p[MAX_PATH];
@@ -52,6 +67,8 @@ class Planner {
 public:
     // Static map from run 1. Precomputes the clearance field (a few tens of ms).
     void setMap(const Block* blocks, int n);
+    // Same, from rows of (x, y, angle): no temporary block array (RAM and stack are tight on small targets).
+    void setMap(const float (*rows)[3], int n);
 
     void clearExtras() { nExtras_ = 0; }
     int numExtras() const { return nExtras_; }
@@ -66,6 +83,7 @@ public:
 
     float clearance(math::Vec2 p) const;                   // blocks + unmapped discs
     float mapClearance(math::Vec2 p) const;                // mapped blocks only
+    float clearanceUpTo(math::Vec2 p, float cap) const;    // exact below cap; any value >= cap above it. Skips far blocks
     bool clearAtLeast(math::Vec2 p, float rad) const;
     bool segmentFree(math::Vec2 a, math::Vec2 b, float rad) const;
 
@@ -73,6 +91,7 @@ public:
     const Block& block(int i) const { return blocks_[i]; }
 
 private:
+    void buildBase();
     int astar(math::Vec2 start, float radius);
     void buildWork();
     void finish(Path& out, int nCoarse);
@@ -91,18 +110,22 @@ private:
     int heapN_ = 0;
 
     // A* cost-so-far and the path post-processing buffers are never live together: A* is finished (and only par_
-    // is still read) by the time coarse_ is written, and finish() needs no A* state.
+    // is still read) by the time coarse is written, and finish() needs no A* state. Inside finish() the heading
+    // buffer hu is only needed after the path has been resampled, when coarse is no longer read, so it shares
+    // coarse's memory.
     struct Finish {
-        math::Vec2 coarse[MAX_COARSE];
+        union {
+            math::Vec2 coarse[MAX_COARSE];
+            float hu[2 * MAX_COARSE];
+        };
         math::Vec2 tmpA[MAX_COARSE];
         math::Vec2 tmpB[MAX_COARSE];
-        float hu[MAX_PATH];
     };
     union Scratch {
         uint16_t g[GRID_CELLS];
         Finish f;
     } scratch_;
-    static_assert(sizeof(Finish) <= sizeof(uint16_t) * GRID_CELLS, "Finish buffers must fit in the A* cost array");
+    static_assert(MAX_PATH <= 2 * MAX_COARSE, "the heading buffer shares the coarse path's memory");
 };
 
 }  // namespace nav

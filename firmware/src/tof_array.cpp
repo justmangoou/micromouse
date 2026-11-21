@@ -87,6 +87,8 @@ bool bringUp(int i) {
     if (VL53L0X_SetDeviceAddress(d, newAddress(i)) != VL53L0X_ERROR_NONE) return false;
     d->I2cDevAddr = newAddress(i);
     if (VL53L0X_StaticInit(d) != VL53L0X_ERROR_NONE) return false;
+    if (cfg::TOF_OFFSET_UM[i] != cfg::TOF_OFFSET_UNSET &&
+        VL53L0X_SetOffsetCalibrationDataMicroMeter(d, cfg::TOF_OFFSET_UM[i]) != VL53L0X_ERROR_NONE) return false;
     if (VL53L0X_PerformRefCalibration(d, &vhv, &phase) != VL53L0X_ERROR_NONE) return false;
     if (VL53L0X_PerformRefSpadManagement(d, &refSpadCount, &apertureSpads) != VL53L0X_ERROR_NONE) return false;
     if (VL53L0X_SetDeviceMode(d, VL53L0X_DEVICEMODE_CONTINUOUS_RANGING) != VL53L0X_ERROR_NONE) return false;

@@ -22,7 +22,15 @@ public:
         const float err = setpoint - measured;
 
         integral_ += err * dt;
-        if (integralLimit > 0) integral_ = std::clamp(integral_, -integralLimit, integralLimit);
+        // Anti-windup: the integral term alone may not exceed the output limit. Without this it winds up while the output
+        // is saturated (to ki * integralLimit, far beyond outputLimit) and keeps the output pinned for a long time after
+        // the error changes sign: the wheel was driven to a stop for ~1 s in a real run.
+        float limit = integralLimit;
+        if (outputLimit > 0 && ki > 0) {
+            const float fromOutput = outputLimit / ki;
+            limit = limit > 0 ? std::min(limit, fromOutput) : fromOutput;
+        }
+        if (limit > 0) integral_ = std::clamp(integral_, -limit, limit);
 
         const float deriv = dt > 0 ? (err - prevError_) / dt : 0.0f;
         prevError_ = err;

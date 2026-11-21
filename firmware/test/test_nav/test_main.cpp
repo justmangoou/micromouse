@@ -149,6 +149,67 @@ void test_speed_controller() {
     TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.5f, c.update_counts(311));
 }
 
+void test_pid_integral_does_not_wind_up_past_the_output_limit() {
+    // ki 0.01, output limit 0.3: after a long saturated error the integral term must be at most 0.3, so a reversed error
+    // brings the output back within a fraction of a second instead of staying pinned for seconds.
+    speed_control::Pid pid(0.001f, 0.01f, 0.0f, 200.0f, 0.3f);
+    for (int i = 0; i < 1000; ++i) pid.update(0.0f, 300.0f, 0.005f);  // 5 s of large negative error: output -0.3
+    float out = 0;
+    int ticks = 0;
+    for (; ticks < 400 && out < 0.0f; ++ticks) out = pid.update(130.0f, 0.0f, 0.005f);  // now a +130 mm/s error
+    TEST_ASSERT_TRUE_MESSAGE(ticks < 100, "the output stayed pinned negative for more than 0.5 s");
+}
+
+// The loaded motor measured on the car: speed = 2700 * (duty - 0.065), response time ~0.15 s. With the controller of the
+// run that wobbled (feed-forward from 622 mm/s, kp 0.001, ki 0.01) a 300 mm/s step overshot by ~270 mm/s.
+void test_speed_controller_tracks_the_measured_motor() {
+    const float mmPerCount = 0.384f, dt = 0.005f, gain = 2700.0f, offset = 0.065f, tau = 0.15f;
+    speed_control::SpeedController c(cfg::MOTOR_FF_MM_S_L, mmPerCount, dt,
+                                     speed_control::Pid(cfg::SPEED_KP, cfg::SPEED_KI, 0.0f, 200.0f, cfg::SPEED_CORR_LIMIT),
+                                     10.0f, cfg::SPEED_FILTER_ALPHA, cfg::SPEED_WINDOW_TICKS, cfg::MOTOR_FF_OFFSET_L);
+    float v = 0.0f, enc = 0.0f, peak = 0.0f, late = 0.0f;
+    const float steps[4][2] = {{0.6f, 300.0f}, {1.2f, 150.0f}, {1.8f, 350.0f}, {2.4f, 0.0f}};
+    int s = 0;
+    for (float t = 0.0f; t < 1.8f; t += dt) {
+        if (t >= steps[s][0]) {
+            if (s == 0) { TEST_ASSERT_FLOAT_WITHIN(25.0f, 300.0f, late); }
+            ++s;
+            peak = 0.0f;
+        }
+        c.update_target(steps[s][1]);
+        enc += v * dt / mmPerCount;
+        int counts = static_cast<int>(enc);
+        enc -= counts;
+        float duty = c.update_counts(counts);
+        float eff = fabsf(duty) < offset ? 0.0f : (duty > 0 ? duty - offset : duty + offset);
+        v += (gain * eff - v) * (dt / tau);
+        if (s == 0) peak = fmaxf(peak, v);
+        if (s == 0 && t > steps[s][0] - 0.1f) late = v;
+        if (s == 0) TEST_ASSERT_TRUE_MESSAGE(peak < 360.0f, "overshoot on the 300 mm/s step");
+    }
+    TEST_ASSERT_FLOAT_WITHIN(25.0f, 350.0f, v);
+}
+
+void test_speed_window_smooths_quantization() {
+    // 300 mm/s with 0.384 mm/count at 200 Hz is 3.9 counts per tick: the encoder gives 4,4,4,3,4,4,4,4,3,...
+    const float mmPerCount = 0.384f, dt = 0.005f;
+    speed_control::SpeedController raw(622.0f, mmPerCount, dt, speed_control::Pid{}, 10.0f, 1.0f, 1);
+    speed_control::SpeedController avg(622.0f, mmPerCount, dt, speed_control::Pid{}, 10.0f, 1.0f, 4);
+    float rawMin = 1e9f, rawMax = -1e9f, avgMin = 1e9f, avgMax = -1e9f;
+    for (int i = 0; i < 80; ++i) {
+        int counts = (i % 9 == 3) ? 3 : 4;
+        raw.update_counts(counts);
+        avg.update_counts(counts);
+        if (i < 8) continue;
+        rawMin = fminf(rawMin, raw.speed()); rawMax = fmaxf(rawMax, raw.speed());
+        avgMin = fminf(avgMin, avg.speed()); avgMax = fmaxf(avgMax, avg.speed());
+    }
+    TEST_ASSERT_TRUE(avgMax - avgMin < 0.5f * (rawMax - rawMin));
+    TEST_ASSERT_FLOAT_WITHIN(15.0f, 300.0f, avg.speed());
+    avg.reset();
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, avg.speed());
+}
+
 void test_speed_controller_deadband() {
     speed_control::SpeedController c(622.0f, 0.005f, 0.005f,
                                speed_control::Pid(0.001f, 0, 0, 0, 0), 20.0f, 1.0f);
@@ -194,12 +255,138 @@ void test_planner_matches_python() {
     TEST_ASSERT_TRUE(gPath.n > 50);
     TEST_ASSERT_FLOAT_WITHIN(0.1f * REF_PATH_LENGTH, REF_PATH_LENGTH, gPath.s[gPath.n - 1]);
     TEST_ASSERT_TRUE(gPath.p[gPath.n - 1].y < -100.0f);
-    TEST_ASSERT_TRUE(gPath.p[gPath.n - 1].x > 1350.0f && gPath.p[gPath.n - 1].x < 1650.0f);
+    TEST_ASSERT_TRUE(gPath.p[gPath.n - 1].x > 1215.0f && gPath.p[gPath.n - 1].x < 1750.0f);  // anywhere on the finish line
     for (int i = 0; i < gPath.n; i++) {
         if (gPath.p[i].y < -20.0f) continue;  // below the line is the run-through
         TEST_ASSERT_TRUE(insideTrack(gPath.p[i], -20.0f));
         TEST_ASSERT_TRUE(gPlanner.clearance(gPath.p[i]) >= 40.0f);
     }
+}
+
+// Regression: in the low-memory build the string pulling hit its corner cap and jumped straight to the end of the route,
+// cutting T16's corner at 65 mm (the car's wheel is 50 mm off its centre line, so it touched). The planned centre line must
+// keep at least 70 mm from every mapped block (the bug gave 63 mm; the coarse 40 mm grid
+// elsewhere reaches 73 mm).
+void test_planned_path_keeps_clear_of_blocks() {
+    Block blocks[MAX_MAP];
+    buildMap(blocks);
+    gPlanner.setMap(blocks, MAP_BLOCK_COUNT);
+    TEST_ASSERT_TRUE(gPlanner.plan({300, -80}, gPath));
+    for (int i = 0; i < gPath.n; i++) {
+        if (gPath.p[i].y < -20.0f) continue;
+        TEST_ASSERT_TRUE_MESSAGE(gPlanner.clearance(gPath.p[i]) >= 70.0f, "planned path too close to a block");
+    }
+}
+
+// --- random-block detection: walls are not blocks, a real block is found, and there is only one -------------------
+namespace {
+
+nav::NavParams randomBlockParams() {
+    nav::NavParams p;  // the same limits as src/course.cpp
+    p.unmappedMinX = 1150.0f;
+    p.unmappedMaxX = 1800.0f;
+    p.unmappedMinY = 60.0f;
+    p.maxExtras = 1;
+    return p;
+}
+
+// ToF readings from blocks and the fixed walls, no noise.
+void tofWithWalls(const Pose& p, const Block* blocks, int n, float out[cfg::TOF_COUNT]) {
+    float c = cosf(p.th), s = sinf(p.th);
+    for (int k = 0; k < cfg::TOF_COUNT; k++) {
+        const auto& m = cfg::TOF_LAYOUT.sensors[k];
+        Vec2 o = {p.x + c * m.x - s * m.y, p.y + s * m.x + c * m.y};
+        float best = cfg::TOF_MAX_MM;
+        for (int f = 0; f < cfg::TOF_LAYOUT.rayCount; f++) {
+            float a = p.th + m.angle + cfg::TOF_LAYOUT.rays[f];
+            Vec2 d = {cosf(a), sinf(a)};
+            best = fminf(best, rayWalls(o, d, cfg::TOF_MAX_MM));
+            for (int b = 0; b < n; b++) best = fminf(best, rayBlock(o, d, blocks[b], cfg::TOF_MAX_MM));
+        }
+        out[k] = std::clamp(best, cfg::TOF_MIN_MM, cfg::TOF_MAX_MM);
+    }
+}
+
+// Park the car at `pose` and feed it `steps` control steps of readings; returns how many random blocks it believes in.
+int detectedAt(const Pose& pose, const Block* extra, int nExtra) {
+    gNav = Navigator(cfg::TOF_LAYOUT, randomBlockParams());
+    gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
+    gNav.start({300.0f, -80.0f, PI / 2}, 0.0f);
+    Block world[MAP_BLOCK_COUNT + 2];
+    int n = 0;
+    for (int i = 0; i < MAP_BLOCK_COUNT; i++) world[n++] = Block(MAP_BLOCKS[i][0], MAP_BLOCKS[i][1], MAP_BLOCKS[i][2]);
+    for (int i = 0; i < nExtra; i++) world[n++] = extra[i];
+    for (int step = 0; step < 12; ++step) {
+        float tof[cfg::TOF_COUNT], duty[2];
+        tofWithWalls(pose, world, n, tof);
+        gNav.step(pose, 0.0f, tof, 1.0f + step * 0.033f, duty);
+    }
+    return gNav.unmappedBlocks();
+}
+
+}  // namespace
+
+void test_walls_are_not_random_blocks() {
+    // Every place the first real run saw a phantom: the arena's right wall, the pit's right wall, the finish tape area.
+    const Pose spots[] = {
+        {1650.0f, 500.0f, 0.0f},      // facing the arena wall at x = 1800
+        {1650.0f, 869.0f, 0.3f},
+        {1500.0f, 300.0f, -0.7f},
+        {1300.0f, 193.0f, PI},        // facing the pit's right wall at x = 1200
+        {1300.0f, 357.0f, PI - 0.4f},
+        {1585.0f, 100.0f, -1.5f},     // heading for the finish
+        {1700.0f, 1100.0f, PI / 2},   // facing the top wall
+    };
+    for (const Pose& p : spots) TEST_ASSERT_EQUAL_INT(0, detectedAt(p, nullptr, 0));
+}
+
+void test_wall_and_background_helpers() {
+    // distance to the nearest wall: the pit's right wall is x = 1200 for y 0..600, the arena's right wall x = 1800
+    TEST_ASSERT_FLOAT_WITHIN(1.0f, 100.0f, wallClearance({1300.0f, 300.0f}));
+    TEST_ASSERT_FLOAT_WITHIN(1.0f, 100.0f, wallClearance({1700.0f, 700.0f}));
+    TEST_ASSERT_TRUE(wallClearance({1500.0f, 300.0f}) > 290.0f);
+    static const uint8_t bits[1] = {0x02};  // cell 1 of a 2 x 1 grid
+    Navigator n(cfg::TOF_LAYOUT);
+    Navigator::Background bg;
+    bg.bits = bits; bg.x0 = 1000.0f; bg.y0 = 0.0f; bg.cell = 40.0f; bg.nx = 2; bg.ny = 1;
+    n.setBackground(bg);
+    TEST_ASSERT_FALSE(n.isBackground({1020.0f, 20.0f}));
+    TEST_ASSERT_TRUE(n.isBackground({1060.0f, 20.0f}));
+    TEST_ASSERT_FALSE(n.isBackground({1060.0f, 60.0f}));  // outside the grid
+}
+
+void test_baseline_flags_only_what_is_new_on_the_path() {
+    // One clean-run entry around the pose (1250, 600) heading south: front sensor read 300 mm, the sides saw nothing.
+    static const Navigator::BaselineEntry table[2] = {{(int16_t)lroundf(1250.0f / 30.0f), 20, (int8_t)lroundf(-1.5708f / 0.15f), {240, 60, 240}},
+                                                       {(int16_t)lroundf(1250.0f / 30.0f), 20, (int8_t)lroundf(-1.5708f / 0.15f), {240, 60, 240}}};
+    auto run = [&](float frontMm) {
+        gNav = Navigator(cfg::TOF_LAYOUT, randomBlockParams());
+        gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
+        Navigator::Baseline b;
+        b.e = table; b.n = 2;
+        gNav.setBaseline(b);
+        gNav.start({300.0f, -80.0f, PI / 2}, 0.0f);
+        Pose pose = {1250.0f, 600.0f, -PI / 2};
+        for (int step = 0; step < 8; ++step) {
+            float tof[cfg::TOF_COUNT] = {1200.0f, frontMm, 1200.0f}, duty[2];
+            gNav.step(pose, 0.0f, tof, 1.0f + step * 0.033f, duty);
+        }
+        return gNav.unmappedBlocks();
+    };
+    TEST_ASSERT_EQUAL_INT(0, run(300.0f));  // exactly what the clean runs read here: background
+    TEST_ASSERT_EQUAL_INT(0, run(240.0f));  // a bit shorter, within the margin
+    TEST_ASSERT_EQUAL_INT(1, run(150.0f));  // 150 mm short of the clean-run reading: a block
+}
+
+void test_one_random_block_is_found_and_only_one() {
+    Block one[1] = {Block(1600.0f, 700.0f, 0.2f)};
+    TEST_ASSERT_EQUAL_INT(1, detectedAt({1350.0f, 700.0f, 0.0f}, one, 1));
+    // two real blocks: the course only has one, so the second is ignored
+    Block two[2] = {Block(1600.0f, 700.0f, 0.0f), Block(1600.0f, 1000.0f, 0.0f)};
+    TEST_ASSERT_TRUE(detectedAt({1350.0f, 850.0f, 0.4f}, two, 2) <= 1);
+    // a block outside the arena's right wing is not accepted (the left half is mapped)
+    Block left[1] = {Block(400.0f, 1000.0f, 0.0f)};
+    TEST_ASSERT_EQUAL_INT(0, detectedAt({500.0f, 800.0f, PI / 2}, left, 1));
 }
 
 // --- closed loop on the host: ideal differential-drive car, ToF from the real world -------------
@@ -274,11 +461,73 @@ void test_closed_loop_with_unmapped_blocks() {
             prevV = v;
         }
         if (bodyOverlaps(truth, world)) hit = true;
-        finished = truth.y < -90.0f && truth.x > 1250.0f && truth.x < 1750.0f && gNav.progress() > 0.8f;
+        finished = truth.y < -90.0f && truth.x > 1215.0f && truth.x < 1750.0f && gNav.progress() > 0.8f;
     }
     TEST_ASSERT_TRUE_MESSAGE(finished, "did not reach the finish line");
     TEST_ASSERT_FALSE_MESSAGE(hit, "the body overlapped a block");
     TEST_ASSERT_TRUE_MESSAGE(t < 40.0f, "too slow");
+}
+
+// The real course: blocks a few cm off the map, and odometry that drifts (heading bias, wheel scale). Returns the
+// closest the body got to any block face and whether the finish was reached.
+static int gLocApplied = 0;
+struct DriftResult { bool finished, hit; float maxErr, endErr; };
+static DriftResult runDrift(bool localise, float biasRadS, float scale, float shiftMm) {
+    static World world;
+    world.n = 0;
+    for (int i = 0; i < MAP_BLOCK_COUNT; i++) {
+        float ox = shiftMm * sinf(i * 2.3f + 1.0f), oy = shiftMm * cosf(i * 1.7f + 0.5f);  // deterministic offsets
+        world.blocks[world.n++] = Block(MAP_BLOCKS[i][0] + ox, MAP_BLOCKS[i][1] + oy, 0.08f * sinf(i * 3.1f));
+    }
+    gNav = Navigator(cfg::TOF_LAYOUT);
+    gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
+    Pose truth = {300.0f, -80.0f, PI / 2}, est = truth;
+    gNav.start(est, 0.0f);
+    const float dt = 1.0f / 30.0f, tau = 0.06f;
+    float w[2] = {0, 0}, prevV = 0, t = 0;
+    DriftResult r = {false, false, 0, 0};
+    for (; t < 60.0f && !r.finished; t += dt) {
+        float tof[cfg::TOF_COUNT];
+        tofFromWorld(truth, world, tof);
+        if (localise && gNav.localize(est, tof, t)) gLocApplied++;
+        float duty[2];
+        gNav.step(est, prevV, tof, t, duty);
+        for (int k = 0; k < 3; k++) {
+            for (int i = 0; i < 2; i++) w[i] += (duty[i] * kCar.vFull * 0.925f - w[i]) * (1.0f - expf(-dt / 3 / tau));
+            float v = 0.5f * (w[0] + w[1]), om = (w[1] - w[0]) / kCar.track;
+            float mid = truth.th + 0.5f * om * dt / 3;
+            truth.x += v * cosf(mid) * dt / 3;
+            truth.y += v * sinf(mid) * dt / 3;
+            truth.th += om * dt / 3;
+            float emid = est.th + 0.5f * om * dt / 3;
+            est.x += scale * v * cosf(emid) * dt / 3;
+            est.y += scale * v * sinf(emid) * dt / 3;
+            est.th += (om + biasRadS) * dt / 3;
+            prevV = v;
+        }
+        if (bodyOverlaps(truth, world)) r.hit = true;
+        float e = hypotf(est.x - truth.x, est.y - truth.y);
+        if (e > r.maxErr) r.maxErr = e;
+        r.endErr = e;
+        r.finished = truth.y < -90.0f && truth.x > 1215.0f && truth.x < 1750.0f && gNav.progress() > 0.8f;
+    }
+    return r;
+}
+
+void test_localisation_against_drift_and_a_shifted_map() {
+    static const float shifts[] = {0.0f, 20.0f, 40.0f};
+    for (float shift : shifts) {
+        for (float bias : {0.003f, 0.012f}) {
+            gLocApplied = 0;
+            DriftResult off = runDrift(false, bias, 1.02f, shift);
+            DriftResult on = runDrift(true, bias, 1.02f, shift);
+            printf("shift %2.0f mm bias %.3f | off: fin=%d hit=%d maxErr=%3.0f | on: fin=%d hit=%d maxErr=%3.0f applied=%d\n",
+                   shift, bias, off.finished, off.hit, off.maxErr, on.finished, on.hit, on.maxErr, gLocApplied);
+        }
+    }
+    DriftResult on = runDrift(true, 0.003f, 1.02f, 0.0f);
+    TEST_ASSERT_TRUE_MESSAGE(on.finished, "with localisation: did not reach the finish");
+    TEST_ASSERT_FALSE_MESSAGE(on.hit, "with localisation: the body overlapped a block");
 }
 
 // Ideal range rays against the maze perimeter and a wall blocking the first
@@ -290,10 +539,19 @@ int main() {
     RUN_TEST(test_gyro_bias_tracker);
     RUN_TEST(test_speed_controller);
     RUN_TEST(test_speed_controller_deadband);
+    RUN_TEST(test_speed_window_smooths_quantization);
+    RUN_TEST(test_speed_controller_tracks_the_measured_motor);
+    RUN_TEST(test_pid_integral_does_not_wind_up_past_the_output_limit);
     RUN_TEST(test_pid_derivative_history);
     RUN_TEST(test_counter_delta_wraps);
     RUN_TEST(test_speed_estimator);
     RUN_TEST(test_planner_matches_python);
+    RUN_TEST(test_planned_path_keeps_clear_of_blocks);
+    RUN_TEST(test_walls_are_not_random_blocks);
+    RUN_TEST(test_one_random_block_is_found_and_only_one);
+    RUN_TEST(test_wall_and_background_helpers);
+    RUN_TEST(test_baseline_flags_only_what_is_new_on_the_path);
     RUN_TEST(test_closed_loop_with_unmapped_blocks);
+    RUN_TEST(test_localisation_against_drift_and_a_shifted_map);
     return UNITY_END();
 }

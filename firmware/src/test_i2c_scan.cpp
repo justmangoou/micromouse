@@ -1,6 +1,6 @@
 /**
- * @file    i2c_scan_test.cpp
- * @brief   Bus scan (env:i2c_scan_test): probes every 7-bit address repeatedly: 20 rounds with every ToF sensor held in reset, then with all of them awake, and
+ * @file    test_i2c_scan.cpp
+ * @brief   Bus scan (env:test_i2c_scan): probes every 7-bit address repeatedly: 20 rounds with every ToF sensor held in reset, then with all of them awake, and
  *          counts the ACKs per address in gScan.hits (read through ST-Link). A healthy MPU6050 shows 0x68 (or 0x69) on
  *          all rounds.
  */
