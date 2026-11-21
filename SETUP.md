@@ -1,3 +1,8 @@
+> **Note (current state).** These notes were written for an earlier version of the robot (Black Pill STM32F411, with a
+> maze mode). The robot now uses a **Blue Pill STM32F103C8** and only the block-course mode. For what the firmware does
+> today, start with [`firmware/README.md`](firmware/README.md); the hardware steps below (wiring checks, motor and sensor
+> bring-up) still apply in spirit, but pins, file names and commands may differ.
+
 # Real-car setup (Black Pill, STM32F411CE)
 
 How to get from the simulator (`sim/`) to a car that behaves like it. Everything here follows the
@@ -139,7 +144,7 @@ Do these in order and write down the numbers. Each one fills in a constant in `s
 
 1. **Flash and log.** Build and upload with `pio run -t upload` from `firmware/` over SWD with an ST-Link. If you have
    no probe, the F411 has a built-in USB DFU bootloader (hold BOOT0, reset, then upload with `upload_protocol = dfu`). Confirm the
-   serial output with `python tools/console.py PORT` (the `test_tof` build prints plain text for `pio device monitor`).
+   serial output with `pio device monitor` (the `test_tof` build prints plain text).
 2. **Motors.** Wheels off the ground. Check direction for + and − duty and the PWM frequency (above audible, ~20 kHz).
    Sweep duty from 0 up and find the duty where each wheel starts to turn (the **deadband**; the sim uses 0.06).
 3. **Encoders.** Turn each wheel by hand exactly 10 revolutions and read the counts. Counts / 10 = counts per rev

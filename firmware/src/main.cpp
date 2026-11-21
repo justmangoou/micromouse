@@ -1,10 +1,11 @@
 /**
  * @file    main.cpp
- * @brief   Start-up and sensor loop shared by the run modes. The mode itself is course.cpp (block course, A*).
+ * @brief   Start-up and the sensor loop. The run itself is in course.cpp.
  *
  * @par Flow
  *   power on -> sensors up -> gyro calibration (keep the robot still) -> runMode(): wait for the button, then run at
- *   30 Hz (ToF, odometry, navigation) while the 200 Hz TIM4 interrupt closes the wheel speed loop.
+ *   30 Hz (ToF, odometry, navigation) while the 200 Hz TIM4 interrupt runs the wheel speed loop. The helpers below
+ *   (waitStep, sensorIssue, updateOdometry, recoverSensors) are declared in robot.h.
  */
 #include <stdio.h>
 #include <cmath>

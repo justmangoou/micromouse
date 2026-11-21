@@ -22,7 +22,11 @@ without clearing discovered obstacles. Both return route success. Failed plannin
 clears the route; `hasRoute()` becomes false and `step()` returns zero commands.
 There is no automatic straight-line fallback.
 
-Firmware tuning/start/finish settings live in `src/course.cpp`, the stored map in
+Random-block detection (`Navigator::detectBlocks`) compares each ToF reading with what it should be: the shortest
+reading clean runs recorded from the same spot (`setBaseline`, see `tools/make_baseline.py`), or the map's blocks and
+walls where there is no baseline. `DetectParams` holds its limits.
+
+The course's settings (start, finish, `NavParams`) live in `include/course_params.h`, the stored map in
 `include/map_data.h`, and sensor geometry/wiring in `include/config.h`.
 Build with `pio run -e course_nav`; run host logic tests with
 `pio test -e native`.

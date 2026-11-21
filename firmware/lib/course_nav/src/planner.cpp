@@ -16,9 +16,8 @@ namespace {
 inline float cellX(int ix) { return ix * GRID_RES; }
 inline float cellY(int iy) { return PAD_Y + iy * GRID_RES; }
 
-// goal cells: x in [1350, 1650], y <= -120 mm (68..82 and 4 at 20 mm cells)
-// The finish line is crossed anywhere from the pit wall (x 1200) to x 1750: the route ends straight below whichever corridor it
-// comes down, with no swing east past T16 (a clean run scraped T16 on that swing).
+// Goal cells: past the finish line (y <= -120 mm) anywhere from x 1260 to 1750. Any crossing wins, so the route goes
+// straight down whichever corridor it takes instead of swinging toward a fixed point (which passed close to T16).
 constexpr int GOAL_X0 = static_cast<int>((1260.0f + GRID_RES - 1.0f) / GRID_RES);
 constexpr int GOAL_X1 = static_cast<int>(1750.0f / GRID_RES);
 constexpr int GOAL_Y1 = static_cast<int>((-120.0f - PAD_Y) / GRID_RES);
@@ -315,9 +314,8 @@ void Planner::finish(Path& out, int n) {
             }
         }
         if (np >= MAX_COARSE / 4) {
-            // Too many corners to smooth safely: keep the rest of the A* path as is. It is clear by construction;
-            // a straight jump to the end is not (it cut T16's corner at 65 mm on the real map), so copy the points,
-            // thinned only as much as needed to fit.
+            // Too many corners to smooth safely: keep the rest of the A* path as it is (it is clear by construction),
+            // thinned only as much as needed to fit. Never jump straight to the end: that line is not checked.
             int rest = n - 1 - i;
             int room = MAX_COARSE - 3 - np;
             int stride = rest > room ? (rest + room - 1) / room : 1;
@@ -376,7 +374,11 @@ void Planner::finish(Path& out, int n) {
         m++;
     }
     out.n = m;
-    // speed factor: slow in tight turns and near blocks
+    // Speed factor per path point, 0.35..1 (the Navigator multiplies the cruise speed by it):
+    //   near blocks  vClr: 1 from 130 mm of clearance down to 0.4 at 95 mm (tight gaps are driven at ~250 mm/s)
+    //   near tape    vEdge: 1 well inside the track down to 0.5 at the edge margin
+    //   in bends     vTurn: 1 / (1 + 1.75 * heading change over +-5 points), at least 0.35
+    // vClr and vEdge both mean "close to something", so the worse of the two counts; the bend factor multiplies.
     scratch_.f.hu[0] = 0.0f;
     float prev = 0.0f;
     for (int k = 0; k < m - 1; k++) {
@@ -393,16 +395,10 @@ void Planner::finish(Path& out, int n) {
     // Clearance and edge terms change slowly along the path: with PROFILE_STRIDE 2 they are found at every other point
     // and interpolated between.
     for (int k = 0; k < m; k += PROFILE_STRIDE) {
-        float clr = clearanceUpTo(out.p[k], R_ROBOT + 60.0f);  // vClr below saturates at R_ROBOT + 60
+        float clr = clearanceUpTo(out.p[k], R_ROBOT + 60.0f);  // exact up to 150 mm, enough for vClr
         float edgeClr = edgeMargin(out.p[k]);
-        // Speed in tight gaps: full speed from 130 mm of clearance, ramping down to 0.4 at 95 mm (~250 mm/s through the 200 mm
-        // T16-T17 gap of the detour; at 0.7 the car entered it at ~480 mm/s and touched T17). Costs ~0.6 s on the normal route.
         float vClr = std::clamp(0.4f + 0.6f * (clr - 95.0f) / 35.0f, 0.4f, 1.0f);
         float vEdge = std::clamp(0.5f + 0.5f * (edgeClr - R_EDGE) / EDGE_SLOW_START, 0.5f, 1.0f);
-        // Clearance and edge are two views of "close to something", so take the worse of them instead of multiplying:
-        // vClr * vEdge * vTurn collapsed to ~0.15 where all three were mildly low (T3/T4 and T14, ~170 mm/s on a 3.1 m
-        // route: 12.2 s at profile speed, 11.1 s now). sqrt(vClr * vEdge) and pow 0.75 were faster still but the host
-        // closed-loop tests then overlapped a block (low-memory build / localisation case).
         out.v[k] = fminf(vClr, vEdge);
     }
     if (PROFILE_STRIDE == 2) {
@@ -412,8 +408,6 @@ void Planner::finish(Path& out, int n) {
         int a = k + kw < m - 1 ? k + kw : m - 1;
         int b = k - kw > 0 ? k - kw : 0;
         float turn = fabsf(scratch_.f.hu[a] - scratch_.f.hu[b]);
-        // 2.0 slowed the car to ~45% on a gentle 0.6 rad bend (the top-left stretch). 1.75 passes the host closed-loop tests in
-        // both builds; 1.5 made the low-memory one overlap a block.
         float vTurn = std::clamp(1.0f / (1.0f + 1.75f * turn), 0.35f, 1.0f);
         out.v[k] *= vTurn;
     }

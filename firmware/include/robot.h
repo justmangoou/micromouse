@@ -1,7 +1,7 @@
 /**
  * @file    robot.h
- * @brief   What main.cpp shares with the navigation mode it was built with (course.cpp): the start-up
- *          result and a sensor loop that hands over one control step at a time.
+ * @brief   What main.cpp (start-up, sensors) offers the run mode (course.cpp): the start-up result, a sensor loop
+ *          that hands over one control step at a time, and the shared health checks.
  */
 #pragma once
 

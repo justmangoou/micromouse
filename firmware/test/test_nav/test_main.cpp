@@ -282,11 +282,11 @@ void test_planned_path_keeps_clear_of_blocks() {
 namespace {
 
 nav::NavParams randomBlockParams() {
-    nav::NavParams p;  // the same limits as src/course.cpp
-    p.unmappedMinX = 1150.0f;
-    p.unmappedMaxX = 1800.0f;
-    p.unmappedMinY = 60.0f;
-    p.maxExtras = 1;
+    nav::NavParams p;  // the course's detection limits (include/course_params.h), without its path filter
+    p.detect.minHitX = 1150.0f;
+    p.detect.maxCentreX = 1800.0f;
+    p.detect.minCentreY = 60.0f;
+    p.detect.maxBlocks = 1;
     return p;
 }
 
@@ -340,30 +340,23 @@ void test_walls_are_not_random_blocks() {
     for (const Pose& p : spots) TEST_ASSERT_EQUAL_INT(0, detectedAt(p, nullptr, 0));
 }
 
-void test_wall_and_background_helpers() {
+void test_wall_clearance() {
     // distance to the nearest wall: the pit's right wall is x = 1200 for y 0..600, the arena's right wall x = 1800
     TEST_ASSERT_FLOAT_WITHIN(1.0f, 100.0f, wallClearance({1300.0f, 300.0f}));
     TEST_ASSERT_FLOAT_WITHIN(1.0f, 100.0f, wallClearance({1700.0f, 700.0f}));
     TEST_ASSERT_TRUE(wallClearance({1500.0f, 300.0f}) > 290.0f);
-    static const uint8_t bits[1] = {0x02};  // cell 1 of a 2 x 1 grid
-    Navigator n(cfg::TOF_LAYOUT);
-    Navigator::Background bg;
-    bg.bits = bits; bg.x0 = 1000.0f; bg.y0 = 0.0f; bg.cell = 40.0f; bg.nx = 2; bg.ny = 1;
-    n.setBackground(bg);
-    TEST_ASSERT_FALSE(n.isBackground({1020.0f, 20.0f}));
-    TEST_ASSERT_TRUE(n.isBackground({1060.0f, 20.0f}));
-    TEST_ASSERT_FALSE(n.isBackground({1060.0f, 60.0f}));  // outside the grid
 }
 
 void test_baseline_flags_only_what_is_new_on_the_path() {
     // One clean-run entry around the pose (1250, 600) heading south: front sensor read 300 mm, the sides saw nothing.
-    static const Navigator::BaselineEntry table[2] = {{(int16_t)lroundf(1250.0f / 30.0f), 20, (int8_t)lroundf(-1.5708f / 0.15f), {240, 60, 240}},
+    static const BaselineEntry table[2] = {{(int16_t)lroundf(1250.0f / 30.0f), 20, (int8_t)lroundf(-1.5708f / 0.15f), {240, 60, 240}},
                                                        {(int16_t)lroundf(1250.0f / 30.0f), 20, (int8_t)lroundf(-1.5708f / 0.15f), {240, 60, 240}}};
     auto run = [&](float frontMm) {
         gNav = Navigator(cfg::TOF_LAYOUT, randomBlockParams());
         gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
-        Navigator::Baseline b;
-        b.e = table; b.n = 2;
+        Baseline b;
+        b.entries = table;
+        b.count = 2;
         gNav.setBaseline(b);
         gNav.start({300.0f, -80.0f, PI / 2}, 0.0f);
         Pose pose = {1250.0f, 600.0f, -PI / 2};
@@ -549,7 +542,7 @@ int main() {
     RUN_TEST(test_planned_path_keeps_clear_of_blocks);
     RUN_TEST(test_walls_are_not_random_blocks);
     RUN_TEST(test_one_random_block_is_found_and_only_one);
-    RUN_TEST(test_wall_and_background_helpers);
+    RUN_TEST(test_wall_clearance);
     RUN_TEST(test_baseline_flags_only_what_is_new_on_the_path);
     RUN_TEST(test_closed_loop_with_unmapped_blocks);
     RUN_TEST(test_localisation_against_drift_and_a_shifted_map);
