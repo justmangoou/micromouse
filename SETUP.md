@@ -1,6 +1,9 @@
-> **Note (current state).** These notes were written for an earlier version of the robot (Black Pill STM32F411, with a
+> **Note (current state).** The Python simulator (`sim/`) this file refers to has been removed from the repository (it is in
+> the git history), and `firmware/` is now the repository root.
+>
+> **Earlier note.** These notes were written for an earlier version of the robot (Black Pill STM32F411, with a
 > maze mode). The robot now uses a **Blue Pill STM32F103C8** and only the block-course mode. For what the firmware does
-> today, start with [`firmware/README.md`](firmware/README.md); the hardware steps below (wiring checks, motor and sensor
+> today, start with [`README.md`](README.md); the hardware steps below (wiring checks, motor and sensor
 > bring-up) still apply in spirit, but pins, file names and commands may differ.
 
 # Real-car setup (Black Pill, STM32F411CE)

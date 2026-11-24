@@ -1,0 +1,60 @@
+rules:
+  type: misc
+  title: "Luật thi xe dò mê cung (cập nhật 12/10/2026), tài liệu của môn Nhập môn Hệ thống nhúng"
+  author: "Môn Nhập môn Hệ thống nhúng"
+  date: 2026-10-12
+
+astar:
+  type: article
+  title: "A formal basis for the heuristic determination of minimum cost paths"
+  author: ["Hart, Peter E.", "Nilsson, Nils J.", "Raphael, Bertram"]
+  date: 1968
+  parent:
+    type: periodical
+    title: "IEEE Transactions on Systems Science and Cybernetics"
+    volume: 4
+    issue: 2
+  page-range: 100-107
+
+chaikin:
+  type: article
+  title: "An algorithm for high-speed curve generation"
+  author: "Chaikin, George M."
+  date: 1974
+  parent:
+    type: periodical
+    title: "Computer Graphics and Image Processing"
+    volume: 3
+    issue: 4
+  page-range: 346-349
+
+coulter:
+  type: report
+  title: "Implementation of the pure pursuit path tracking algorithm"
+  author: "Coulter, R. Craig"
+  date: 1992
+  serial-number: "CMU-RI-TR-92-01"
+  organization: "Carnegie Mellon University, Robotics Institute"
+
+siegwart:
+  type: book
+  title: "Introduction to Autonomous Mobile Robots"
+  author: ["Siegwart, Roland", "Nourbakhsh, Illah R.", "Scaramuzza, Davide"]
+  edition: 2
+  date: 2011
+  publisher: "MIT Press"
+
+stm32:
+  type: misc
+  title: "STM32F103x8, STM32F103xB datasheet"
+  author: "STMicroelectronics"
+
+vl53:
+  type: misc
+  title: "VL53L0X: World's smallest time-of-flight ranging and gesture detection sensor, datasheet"
+  author: "STMicroelectronics"
+
+mpu:
+  type: misc
+  title: "MPU-6000 and MPU-6050 product specification"
+  author: "InvenSense"

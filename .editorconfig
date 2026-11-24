@@ -15,7 +15,7 @@ indent_size = 2
 trim_trailing_whitespace = false
 
 # ST's code keeps its own formatting
-[firmware/lib/vl53l0x_api/**]
+[lib/vl53l0x_api/**]
 charset = unset
 end_of_line = unset
 insert_final_newline = unset

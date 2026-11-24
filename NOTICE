@@ -9,7 +9,7 @@ project's own code. The third-party material below stays under its own terms.
 1. Bundled in this repository
 =============================
 
-1.1  ST VL53L0X API  --  firmware/lib/vl53l0x_api/
+1.1  ST VL53L0X API  --  lib/vl53l0x_api/
 -----------------------------------------------------
 Copyright (c) 2015-2016, STMicroelectronics International N.V.
 Source: https://www.st.com/en/embedded-software/stsw-img005.html (core files only).
@@ -40,7 +40,7 @@ the one #include line deleted from vl53l0x_platform.h.
 ApiExample/ holds ST's example programs, which carry no license header. They are not compiled (library.json builds src/
 and include/ only) and are not covered by the MIT License.
 
-1.2  STM32 HAL configuration template  --  firmware/include/stm32f4xx_hal_conf.h
+1.2  STM32 HAL configuration template  --  include/stm32f4xx_hal_conf.h
 ---------------------------------------------------------------------------------
 Copyright (c) 2017 STMicroelectronics. All rights reserved. Derived from ST's stm32f4xx_hal_conf_template.h
 (STM32CubeF4). The file's header refers to a LICENSE file that is not included here; the STM32CubeF4 HAL drivers are
@@ -69,6 +69,6 @@ STM32Cube HAL and the ST VL53L0X API, so reproduce the notices from section 1 (a
 3. Original work
 ================
 
-Everything else, including the simulator in sim/ and the firmware in firmware/ outside of 1.1 and 1.2, is original to
-this project. Where a file says it ports another file in this repository (for example "Port of FusedOdometry in
-sim/robot.py"), both are original.
+Everything else, including the firmware outside of 1.1 and 1.2, is original to this project. The Python simulator the
+firmware was first prototyped in (sim/) has been removed from the tree; it is still in the git history. Comments that
+say a file ports something from sim/ refer to that history.

@@ -25,7 +25,7 @@ __pycache__/
 *.hex
 *.map
 
-# Regenerable sim output: rendered GIFs, training logs, in-progress checkpoints
+# Rendered GIFs and logs
 *.gif
 *.log
-sim/checkpoints/*_last.npz
+
