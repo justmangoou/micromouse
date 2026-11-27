@@ -102,6 +102,67 @@ def draw_runs(runs, path, title=None, block=None):
     plt.close(fig)
 
 
+# The robot's outline for the footprint figures, mm: 100 long, as wide as the wheel separation (WHEEL_TRACK_MM). The
+# logged position is taken to be at its centre.
+ROBOT_LENGTH, ROBOT_WIDTH = 100.0, 82.0
+
+
+def footprints(d, spacing=3.0):
+    """The outline's corners every few mm along a run."""
+    dist = np.r_[0, np.cumsum(np.hypot(np.diff(d["x"]), np.diff(d["y"])) + 0.01)]
+    at = np.arange(0, dist[-1], spacing)
+    x, y = np.interp(at, dist, d["x"]), np.interp(at, dist, d["y"])
+    th = np.interp(at, dist, np.unwrap(d["th_mrad"] / 1000))
+    half = np.array([[1, 1], [-1, 1], [-1, -1], [1, -1]]) * (ROBOT_LENGTH / 2, ROBOT_WIDTH / 2)
+    rot = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]]).transpose(2, 0, 1)
+    return np.einsum("nij,kj->nki", rot, half) + np.stack([x, y], 1)[:, None, :]
+
+
+def closest_approach(shapes, blocks):
+    """Smallest gap between the outline and any 100 mm block: (mm, name, point on the outline). 0 = they overlap."""
+    t = np.linspace(0, 1, 41)[:, None]
+    edges = np.concatenate([shapes[:, i, None, :] * (1 - t) + shapes[:, (i + 1) % 4, None, :] * t for i in range(4)], 1)
+    points = edges.reshape(-1, 2)
+    best = (1e9, "", (0, 0))
+    for bx, by, tag in blocks:
+        gap = np.hypot(*np.maximum(np.abs(points - (bx, by)) - 50, 0).T)
+        i = int(np.argmin(gap))
+        if gap[i] < best[0]:
+            best = (float(gap[i]), tag, tuple(points[i]))
+    return best
+
+
+def draw_footprint(d, path, title, colour, extra=None):
+    """The area the robot's body swept. Its edge is the collision line: a block touching it was hit."""
+    fig, ax = plt.subplots(figsize=(9, 7.2), layout="constrained")
+    draw_course_arena(ax)
+    shapes = footprints(d)
+    for corners in shapes:  # outlines first, fills on top: only the outer edge of the swept area stays visible
+        ax.add_patch(Polygon(corners, fc="none", ec=colour, lw=2.6, zorder=2.4))
+    tint = tuple(0.8 + 0.2 * c for c in matplotlib.colors.to_rgb(colour))
+    for corners in shapes:
+        ax.add_patch(Polygon(corners, fc=tint, ec=tint, lw=0.3, zorder=2.5))
+    ax.plot(d["x"], d["y"], color=colour, lw=1, ls=(0, (4, 3)), zorder=6)
+    ax.add_patch(Polygon(shapes[-1], fc="none", ec=INK, lw=1.2, zorder=7))
+
+    blocks = list(MAP_BLOCKS)
+    if extra:
+        blocks.append((extra[0], extra[1], "the extra block"))
+        ax.add_patch(Rectangle((extra[0] - 50, extra[1] - 50), 100, 100, fc="none", ec=INK, lw=1.8,
+                               ls=(0, (3, 2)), zorder=6))
+        ax.text(extra[0], extra[1], "extra", ha="center", va="center", fontsize=8.5, zorder=7)
+    gap, tag, at = closest_approach(shapes, blocks)
+    ax.add_patch(Circle(at, 28, fc="none", ec=INK, lw=1.8, zorder=9))
+    ax.annotate(f"closest: {gap:.0f} mm to {tag}", at, (900, 300), ha="center", va="center", fontsize=11,
+                arrowprops=dict(arrowstyle="-", color=MUTED, lw=1, shrinkB=9), zorder=9)
+    ax.text(900, 220, f"shaded: swept by the body\n({ROBOT_LENGTH:.0f} x {ROBOT_WIDTH:.0f} mm)\n"
+                      "dashed: path of its centre", ha="center", va="top", fontsize=9.5, color=MUTED, zorder=9)
+    ax.set_title(f"{title}  ({d['ms'][-1] / 1000:.2f} s)", loc="left", fontsize=13, fontweight="bold")
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+    print(f"{os.path.basename(path)}: closest {gap:.1f} mm to {tag} at ({at[0]:.0f}, {at[1]:.0f})")
+
+
 def draw_detection(path):
     """Schematic of Navigator::detectBlocks: a short reading, and where in the sensor's cone the block is placed."""
     fig, ax = plt.subplots(figsize=(8, 7.4), layout="constrained")
@@ -147,8 +208,11 @@ def draw_detection(path):
 def main():
     os.makedirs(MEDIA, exist_ok=True)
     runs = os.path.join(ROOT, "data", "block_runs")
-    draw_runs([("run 1: no extra block", load_run(os.path.join(runs, "reference.csv"))),
-               ("run 2: goes around it", load_run(os.path.join(runs, "140850.csv")))],
+    clean, latest = load_run(os.path.join(runs, "reference.csv")), load_run(os.path.join(runs, "140850.csv"))
+    draw_footprint(clean, os.path.join(MEDIA, "footprint_run1.png"), "Run 1, no extra block", SERIES[0])
+    draw_footprint(latest, os.path.join(MEDIA, "footprint_run2.png"), "Latest run 2, with the extra block", SERIES[1],
+                   extra=(1250, 661))
+    draw_runs([("run 1: no extra block", clean), ("run 2: goes around it", latest)],
               os.path.join(MEDIA, "block_run.png"), block=(1250, 661))
     draw_detection(os.path.join(MEDIA, "detection.png"))
     print("wrote", os.path.normpath(MEDIA))

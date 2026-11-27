@@ -30,6 +30,18 @@ new block.
 
 *A real pair of runs, drawn from the robot's own position estimate.*
 
+### How close it gets
+
+The shaded area is everything the robot's body passed over, taken as a rectangle 100 mm long and 82 mm wide (the
+wheel separation), centred on the logged position. Its edge is the collision line.
+
+![Run 1: area swept by the robot body](media/footprint_run1.png)
+
+![Latest run 2: area swept by the robot body](media/footprint_run2.png)
+
+These come from the robot's own position estimate, so they show where it *thought* it was, not a measurement. A few cm
+of drift is enough to turn a near miss into a hit. The extra block's position is also an estimate.
+
 Step by step:
 
 1. Switch on and don't touch it for about 4 seconds while the gyro calibrates.
@@ -90,7 +102,7 @@ makes the motors deliver it: it estimates the power needed, then corrects using 
 
 - It slows down in the right-hand section until it has passed the block.
 - If the block only appears when very close, it backs off a little before turning.
-- In the narrow lane before the finish, the side sensors nudge its position estimate so it steers away from the walls.
+- In the narrow lane before the finish, the side sensors nudge its position estimate so it steers away from the blocks on either side (T16 and T17).
 
 ### Safety
 

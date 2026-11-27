@@ -138,9 +138,12 @@ One exception: the front sensor sometimes reads a false 30 to 80 mm on open floo
 80 mm, the **median** is used.
 
 **From the map (where run 1 never was).** After dodging, the robot is somewhere run 1 did not drive. Then it casts rays
-from the sensor's position at the mapped blocks and walls, and takes the nearest hit.
+from the sensor's position at the mapped blocks and the course's boundary lines, and takes the nearest hit.
 
-Comparing with run 1 works much better than the map: errors in block positions, sensor quirks and walls missing from
+> **Known mismatch:** the code treats the course boundaries as walls the sensors can see. The course has no physical
+> walls. This only matters in this map fallback, not when comparing with run 1.
+
+Comparing with run 1 works much better than the map: errors in block positions, sensor quirks and things missing from
 the map were all there in run 1 too, so they cancel out.
 
 ### Step 2: is the reading short?
