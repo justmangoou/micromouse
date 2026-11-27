@@ -1,0 +1,20 @@
+=== run1 (reference): #14, 166 log records
+  5628 ms, replans 1, unmapped 0, state 3 fault 0 lastFault 0
+   0 (  300,  -80) th  1.570
+   1 (  301,   30) th  1.566
+   2 (  199,  264) th  2.297
+   3 (  184,  459) th  0.899
+   4 (  371,  649) th  0.694
+   5 (  521,  841) th  1.079
+   6 (  699,  894) th -0.385
+   7 (  935,  836) th -0.156
+   8 ( 1118,  731) th -0.619
+   9 ( 1241,  659) th -0.851
+  10 ( 1274,  559) th -1.427
+  11 ( 1287,  357) th -1.580
+  12 ( 1281,  137) th -1.590
+  13 ( 1278,  -63) th -1.628
+  14 ( 1276,  -95) th -1.633
+  wrote /Users/justmango/Documents/micromouse/tools/../data/20261127-102516/log_run1.csv
+=== run2: no finished run (empty, or the run never ended), 267 log records
+  wrote /Users/justmango/Documents/micromouse/tools/../data/20261127-102516/log_run2.csv

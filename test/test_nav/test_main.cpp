@@ -424,6 +424,32 @@ void test_trust_after_the_block_is_passed() {
     TEST_ASSERT_FALSE(gNav.blockPassed());
 }
 
+// The firmware keeps the motors' command alive through a plan only if replanDue() was true before the step.
+void test_a_plan_is_announced_before_the_step_that_runs_it() {
+    Block world[MAP_BLOCK_COUNT + 1];
+    buildMap(world);
+    world[MAP_BLOCK_COUNT] = Block(1600.0f, 700.0f, 0.0f);
+    gNav = Navigator(cfg::TOF_LAYOUT, randomBlockParams());
+    gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
+    gNav.start({300.0f, -80.0f, PI / 2}, 0.0f);
+    const Pose pose = {1350.0f, 700.0f, 0.0f};
+    TEST_ASSERT_TRUE(gNav.reposition(pose, 1.0f));
+    int planned = 0;
+    for (int i = 0; i < 20; ++i) {
+        const float t = 2.0f + i * 0.033f;
+        float tof[cfg::TOF_COUNT], duty[2];
+        tofWithWalls(pose, world, MAP_BLOCK_COUNT + 1, tof);
+        const bool announced = gNav.replanDue(t);
+        const int before = gNav.replans();
+        gNav.step(pose, 0.0f, tof, t, duty);
+        if (gNav.replans() != before) {
+            TEST_ASSERT_TRUE_MESSAGE(announced, "planned without warning");
+            ++planned;
+        }
+    }
+    TEST_ASSERT_TRUE(planned >= 1);
+}
+
 // --- closed loop on the host: ideal differential-drive car, ToF from the real world -------------
 namespace {
 
@@ -587,6 +613,7 @@ int main() {
     RUN_TEST(test_wall_clearance);
     RUN_TEST(test_baseline_flags_only_what_is_new_on_the_path);
     RUN_TEST(test_trust_after_the_block_is_passed);
+    RUN_TEST(test_a_plan_is_announced_before_the_step_that_runs_it);
     RUN_TEST(test_closed_loop_with_unmapped_blocks);
     RUN_TEST(test_localisation_against_drift_and_a_shifted_map);
     return UNITY_END();

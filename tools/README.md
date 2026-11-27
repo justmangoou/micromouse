@@ -10,8 +10,9 @@
 
 ## A session
 
-1. Run 1, no random block (LED: slow even blink). A clean finish stores the reference in the robot's flash.
+1. Run 1, no random block (LED: slow even blink). A clean finish makes it the reference until power-off or reset.
 2. Run 2, with the block (LED: double blink). Detection compares against run 1. Nothing needs a PC in between.
 3. `python3 tools/analyze.py` with the ST-Link connected.
 
-Hold KEY for 2 s during the countdown to forget the reference and start again from run 1.
+Switching off or resetting forgets the reference (the logs stay readable); so does holding KEY for 2 s during the
+countdown.

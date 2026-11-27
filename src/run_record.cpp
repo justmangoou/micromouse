@@ -55,6 +55,9 @@ uint32_t gPagesErased = 0;
 bool gSlotsUsable = false;  // the program does not reach into the slots
 bool gSlotReady = false;    // the slot is erased: the log may be written
 bool gSaved = true;         // this run's trace is in flash (true until a run is prepared)
+// The map has been learned since power-on. Only in RAM: the flash copy stays readable (tools/read_run.py) but a restart
+// learns again.
+bool gLearned = false;
 
 extern "C" uint32_t _sidata, _sdata, _edata;  // linker: end of the program image in flash
 
@@ -130,7 +133,7 @@ bool boot() {
 
 nav::Baseline reference() {
     nav::Baseline b;
-    if (!programBelowSlots() || *reinterpret_cast<const uint32_t*>(SLOT_ADDR[0]) != REF_MAGIC) return b;
+    if (!gLearned) return b;
     b.records = reinterpret_cast<const uint8_t*>(SLOT_ADDR[0] + TRACE_BYTES);
     while (b.count < static_cast<int>(MAX_RECORDS) &&
            *reinterpret_cast<const uint16_t*>(b.records + b.count * RECORD_BYTES) != 0xFFFF)  // erased: the log ends
@@ -138,14 +141,7 @@ nav::Baseline reference() {
     return b;
 }
 
-void clearReference() {
-    if (!reference().records) return;
-    FLASH_EraseInitTypeDef erase = {FLASH_TYPEERASE_PAGES, FLASH_BANK_1, SLOT_ADDR[0], 1};  // the page with the header
-    uint32_t pageError = 0;
-    HAL_FLASH_Unlock();
-    HAL_FLASHEx_Erase(&erase, &pageError);
-    HAL_FLASH_Lock();
-}
+void clearReference() { gLearned = false; }
 
 void prepare() {
     const uint32_t a = runNumberIn(0), b = runNumberIn(1);
@@ -257,6 +253,7 @@ bool saveIfEnded(const reliability::Supervisor& supervisor, bool reachedFinish) 
     memcpy(buffer, &header, sizeof(header));
     memcpy(buffer + sizeof(header), const_cast<const Trace*>(&gTrace), sizeof(Trace));
     flashWrite(SLOT_ADDR[gSlot], buffer, sizeof(buffer));
+    if (isReference) gLearned = true;
     return true;
 }
 

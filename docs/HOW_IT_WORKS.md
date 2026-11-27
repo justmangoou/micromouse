@@ -50,14 +50,16 @@ Step by step:
 3. The robot drives and stops after the finish line.
 4. Carry it back to the start and press KEY for the next run.
 
-Run 1 is remembered after switching off. To forget it and learn again, hold KEY for 2 seconds during a countdown.
+**Run 1 is forgotten at power-off or reset.** The first run after switching on always learns the course, so the extra
+block must not be there yet. Every run after that looks for it. To learn again without switching off, hold KEY for
+2 seconds during a countdown.
 
 ### What the LED means
 
 | LED | Meaning |
 |---|---|
 | Slow, even blink | Ready for run 1 |
-| Double blink | Ready for run 2 (run 1 is stored) |
+| Double blink | Ready for run 2 and later (run 1 is learned) |
 | Fast blink | Countdown |
 | Solid | Calibrating, driving, or finished |
 | N short flashes, then a pause | Fault number N, see below |
@@ -206,4 +208,4 @@ To flash a test program, use its build name: `pio run -e test_imu -t upload`.
 - **Only one extra block is handled.** A second one would be ignored.
 - **Position drifts.** There is code to correct it using the known blocks (`Navigator::localize`), but it is switched
   off because it can jump when a block is not exactly where the map says.
-- **Run 1 must be a clean finish** to be stored. Otherwise the robot stays in run 1 mode.
+- **Run 1 must be a clean finish** to count. Otherwise the robot stays in run 1 mode.

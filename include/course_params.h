@@ -42,7 +42,9 @@ inline nav::NavParams navParams(bool findBlock) {
     p.finishY = 250.0f;        // past the last block: drive onto the finish line at no less than ...
     p.finishSpeed = 0.45f;     // ... this fraction of vFull
 
-    p.laneClose = 80.0f;       // finish lane: correct the drift off T16 / T17 with the side sensors
+    p.laneClose = 90.0f;       // finish lane: correct the drift off T16 / T17 with the side sensors ...
+    p.laneStep = 4.0f;         // ... this far per control step ...
+    p.laneLimit = 60.0f;       // ... and at most this much in all
 
     // Trust: with the block confirmed and behind us, the rest of the course is the known map.
     p.trustSupport = 3;        // agreeing readings
@@ -58,7 +60,7 @@ inline nav::NavParams navParams(bool findBlock) {
     d.maxCentreX = 1800.0f;    // inside the arena ...
     d.minCentreX = 1160.0f;    // ... not deep in the forbidden middle (estimates of a real block reach 1190) ...
     d.clampCentreX = 1250.0f;  // ... and a block cannot stand further left than this
-    d.minCentreY = 60.0f;      // ... and not on the finish tape
+    d.minCentreY = 0.0f;       // ... and not past the finish line
     d.pathReach = 150.0f;      // the hit is near the route in the next 700 mm ...
     d.centreReach = 60.0f;     // ... and the block would stand on it
     d.pathAhead = 700.0f;

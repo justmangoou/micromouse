@@ -52,5 +52,5 @@ void noteStall();
 // Measure the gyro's offset again (blocks ~1.5 s, motors off, car still). False when rejected: the old offset stays.
 bool recalibrateGyro();
 
-// Updates gRuntime and prints state/fault changes.
+// Updates gRuntime (state, faults and sensor health, readable over ST-Link).
 void reportRuntime(const reliability::Supervisor& supervisor, const SensorStep& step);

@@ -7,7 +7,6 @@
  *   30 Hz (ToF, odometry, navigation) while the 200 Hz TIM4 interrupt runs the wheel speed loop. The helpers below
  *   (waitStep, sensorIssue, updateOdometry, recoverSensors) are declared in robot.h.
  */
-#include <stdio.h>
 #include <cmath>
 
 #include "board.h"
@@ -89,8 +88,6 @@ int main() {
     StartupStatus& status = gStartup;
     status.imuOk = gImu.init();
     status.tofUp = tofInit(gI2c);
-    printf("\r\nimu %s, tof %d/%d up\r\ngyro calibration: keep the robot still\r\n", status.imuOk ? "ok" : "FAILED",
-           status.tofUp, TOF_COUNT);
 
     // Two seconds to take your hands off and let the chip settle; the LED blinks, then stays on during the calibration.
     for (uint32_t t = 0; t < cfg::GYRO_SETTLE_MS; t += 100) {
@@ -100,8 +97,6 @@ int main() {
     ledStatusSet(true);
     status.calibrated = status.imuOk && gImu.calibrateGyroZ(cfg::GYRO_CALIBRATION_SAMPLES, cfg::GYRO_PERIOD_MS,
                                                              cfg::GYRO_CAL_MAX_STD_RAD_S, cfg::GYRO_CAL_MAX_BIAS_RAD_S);
-    printf("gyro calibration %s, bias %d mdeg/s\r\n", status.calibrated ? "ok" : "FAILED",
-           (int)(cfg::GYRO_SIGN * gImu.gyroBiasZ() * 57295.78f));
 
     int32_t left, right;
     motorTakeCounts(&left, &right);  // drop whatever the wheels moved during start-up
@@ -165,9 +160,6 @@ bool recoverSensors(const SensorStep& s) {
 }
 
 void reportRuntime(const reliability::Supervisor& supervisor, const SensorStep& s) {
-    if (gRuntime.state != supervisor.state() || gRuntime.fault != supervisor.fault()) {
-        printf("state %u fault %u\r\n", (unsigned)supervisor.state(), (unsigned)supervisor.fault());
-    }
     gRuntime.state = supervisor.state();
     gRuntime.fault = supervisor.fault();
     gRuntime.commandExpiries = motorCommandExpiries();

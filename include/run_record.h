@@ -4,7 +4,8 @@
  *
  * Two slots of 6 KB at the top of the 64 KB flash:
  *   - slot 0, run 1: the course without the random block. Once such a run reaches the finish with no fault, its log is
- *     the reference for block detection, and it is kept until the reference is cleared (hold KEY).
+ *     the reference for block detection until power-off, a reset, or holding KEY. The log stays in flash, but after a
+ *     restart it is not used: the first run learns again.
  *   - slot 1, run 2: every run made while a reference exists.
  * A slot holds
  *   - a summary and a trace (pose every 400 ms, state, faults, blocks found), written once when the run ends, and
@@ -29,7 +30,7 @@ namespace runrec {
 // Once at boot. True when the chip reset in the middle of the last run.
 bool boot();
 
-// The reference run (see above), for Navigator::setBaseline. Empty when there is none.
+// The reference run (see above), for Navigator::setBaseline. Empty when none was recorded since power-on.
 nav::Baseline reference();
 void clearReference();
 

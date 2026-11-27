@@ -158,11 +158,13 @@ private:
     int idx_ = 0;                // path point nearest the car
     float lastAlpha_ = 0.0f;
     uint8_t streak_[tof::MAX_SENSORS] = {0};
+    math::Vec2 spot_ = {0, 0};  // where the front sensor's short readings point
     uint8_t hits_[MAX_EXTRA] = {0};  // detections merged into each found block
     uint16_t support_ = 0;
     float laneShifted_ = 0.0f;
     int backing_ = 0;  // control steps of reversing still to do
     bool passed_ = false;
+    bool align_ = false;  // turn on the spot until facing the route, then drive
     float lastPlanT_ = 0.0f;
     float alertUntil_ = -1.0f;
     bool needReplan_ = false;

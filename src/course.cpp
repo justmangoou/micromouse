@@ -7,7 +7,7 @@
  *   power on -> sensors up, gyro calibrated (main.cpp) -> LED ready:
  *       slow even blink: run 1, no random block on the course. A clean finish records the reference.
  *       double blink:    run 2, a reference exists; the random block is looked for and avoided.
- *   (hold KEY for 2 s during the countdown to forget the reference and start again from run 1)
+ *   Run 1 is learned anew after every power-on or reset (or hold KEY for 2 s during the countdown).
  *   press KEY -> 3 s countdown (LED blinks fast; the run record's flash slot is erased meanwhile). 1 s after KEY is let
  *       go the gyro offset is measured again (LED solid, ~1.5 s, hands off)
  *   run: 30 Hz control step (odometry -> Navigator -> wheel targets), the 200 Hz speed loop drives the wheels
@@ -64,7 +64,7 @@ struct Course {
 
 // ---- Helpers ----------------------------------------------------------------------------------------------------------
 
-// Run 1 or run 2: with a reference in flash the Navigator looks for the random block against it.
+// Run 1 or run 2: with a reference learned the Navigator looks for the random block against it.
 void applyMode(Course& c) {
     const nav::Baseline reference = runrec::reference();
     c.hasReference = reference.records != nullptr;
@@ -132,7 +132,6 @@ bool handleStart(Course& c, const SensorStep& s, Fault& issue) {
     if (c.countingDown && c.pressed >= CLEAR_STEPS) {  // KEY still held: forget the reference, back to run 1
         runrec::clearReference();
         applyMode(c);
-        noteStall();  // the page erase blocked the loop
         c.countingDown = false;
         c.waitRelease = true;
     }

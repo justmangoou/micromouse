@@ -22,6 +22,12 @@ constexpr int GOAL_X0 = static_cast<int>((1260.0f + GRID_RES - 1.0f) / GRID_RES)
 constexpr int GOAL_X1 = static_cast<int>(1750.0f / GRID_RES);
 constexpr int GOAL_Y1 = static_cast<int>((-120.0f - PAD_Y) / GRID_RES);
 
+// The finish lane: T15 and T16 on the left, T17 on the right, 200 mm apart. The grid route swings from side to side in
+// it (it centres on whichever block is alongside), and the car cut that bend to within a few mm of T17. So the route is
+// laid straight, 15 mm left of the middle (the car drifts toward T17), eased in between LANE_ENTRY_Y and LANE_TOP_Y.
+constexpr float LANE_X = 1585.0f, LANE_HALF = 100.0f;
+constexpr float LANE_ENTRY_Y = 560.0f, LANE_TOP_Y = 440.0f;
+
 inline bool isGoal(int ix, int iy) { return ix >= GOAL_X0 && ix <= GOAL_X1 && iy <= GOAL_Y1; }
 
 inline int heuristic(int ix, int iy) {
@@ -374,6 +380,14 @@ void Planner::finish(Path& out, int n) {
         m++;
     }
     out.n = m;
+    bool laneFree = true;  // a detected block in or beside the lane: leave the route as planned around it
+    for (int e = 0; e < nExtras_; e++) laneFree &= extras_[e].x < LANE_X - LANE_HALF - DISC_R;
+    for (int k = 0; laneFree && k < m; k++) {
+        math::Vec2& q = out.p[k];
+        if (q.y >= LANE_ENTRY_Y || fabsf(q.x - LANE_X) >= LANE_HALF) continue;
+        const float blend = fminf((LANE_ENTRY_Y - q.y) / (LANE_ENTRY_Y - LANE_TOP_Y), 1.0f);
+        q.x += blend * (LANE_X - q.x);
+    }
     // Speed factor per path point, 0.35..1 (the Navigator multiplies the cruise speed by it):
     //   near blocks  vClr: 1 from 130 mm of clearance down to 0.4 at 95 mm (tight gaps are driven at ~250 mm/s)
     //   near tape    vEdge: 1 well inside the track down to 0.5 at the edge margin

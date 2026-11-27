@@ -68,6 +68,8 @@ centre.
    the result stays 85 mm clear.
 3. **Extend** 300 mm past the end, so the robot drives through the finish line instead of aiming at it.
 4. **Resample** to one point every 20 mm.
+5. **Straighten the finish lane:** below y = 440, points between x = 1500 and 1700 are moved to x = 1585, 15 mm left of
+   the middle of the lane (eased in from y = 560). Skipped if a detected block is in or beside the lane.
 
 ### Speed factor for each point
 
@@ -134,8 +136,8 @@ expected *here*, take all saved records within 45 mm in x and y and 220 mrad (ab
 least two, the expected value for each sensor is the **shortest** reading among them. The shortest, because it is the
 most cautious: from nearly the same spot a sensor may or may not catch the corner of a block.
 
-One exception: the front sensor sometimes reads a false 30 to 80 mm on open floor. If its shortest value is below
-80 mm, the **median** is used.
+One exception: the front sensor sometimes reads a false 30 to 80 mm on open floor. So its **second** shortest value is used (one stray cannot set it), or the
+**median** if that is still below 80 mm.
 
 **From the map (where run 1 never was).** After dodging, the robot is somewhere run 1 did not drive. Then it casts rays
 from the sensor's position at the mapped blocks and the course's boundary lines, and takes the nearest hit.
@@ -153,7 +155,9 @@ the map were all there in run 1 too, so they cancel out.
 | Run 1 | `z < expected - 100`, and `40 ≤ z < 800` |
 | Map | `z < expected - (40 + 0.08 · expected)`, and `z < 800` |
 
-It must stay short for **5 consecutive steps** (about 0.17 s). One normal reading resets the count.
+It must stay short for **5 consecutive steps** (about 0.17 s). One normal reading resets the count. While driving
+straight down a lane, for the front sensor the point it hits must also stay within 40 mm of where the count started: a burst of false readings wanders, a
+real block stays put while the robot closes in.
 
 ### Step 3: where is the block?
 
@@ -170,18 +174,22 @@ it as in the way.
 
 ### Step 4: filters
 
-All must pass:
+All must pass. A new block is also never placed from a side sensor reading beyond 350 mm: at 45 degrees and that
+range the position is too uncertain.
 
 | Check | Rejects |
 |---|---|
 | Surface hit point has x ≥ 1150 | anything outside the right-hand section |
 | Hit point within 150 mm of the path in the next 700 mm | things off to the side |
 | *(map mode only)* hit point 150 mm from every wall and mapped block | known things seen slightly out of place |
-| Centre has 1160 ≤ x ≤ 1800 and y ≥ 60 | impossible places |
+| Centre has 1160 ≤ x ≤ 1800 and y ≥ 0 | impossible places |
 | (x is then raised to at least 1250) | a block cannot stand further left |
 | Centre within 60 mm of the path | blocks that would not actually be hit |
 
 ### Step 5: record it
+
+If a side sensor reads under 80 mm at that moment, the block is placed from **that** reading instead (when it is within
+200 mm of the guess and not a mapped block): something right beside the robot is located far better by it.
 
 - A detection within 180 mm of a known block is **the same block**. For the first few, the stored position moves 30%
   of the way towards the new estimate.
@@ -200,12 +208,13 @@ Run 1 read 600 mm ahead at this spot. Now the front sensor reads 350 mm.
 
 ### After detection
 
-- **Back off:** if the new block is within 200 mm, reverse for 10 steps before turning.
+- **Back off:** if the new block is within 200 mm, reverse for 10 steps (fewer if a mapped block is behind), then turn on the spot until facing the new
+  route before driving.
 - **Trust:** once at least 3 short readings agree on the block and the robot is 150 mm past it, detection switches off
   and the caution speed limit is lifted.
-- **Finish lane:** after a block was found, in the narrow lane at the end (x ≥ 1450, y ≤ 400, driving down), a side
-  reading under 80 mm shifts the position estimate 3 mm per step towards that side, so the steering moves away.
-  At most 80 mm in total.
+- **Finish lane:** after a block was found, in the narrow lane at the end (x ≥ 1450, y ≤ 600, driving down), a side
+  reading under 90 mm shifts the position estimate 4 mm per step towards that side, so the steering moves away.
+  At most 60 mm in total.
 
 ### When detection can fail
 

@@ -15,7 +15,8 @@ status LED.
 3. Carry it back to the start and press KEY again for the next run.
 
 Run 1 is without the random block (ready LED: slow even blink). Once it finishes cleanly, its log is the reference and
-the next runs look for the block (ready LED: double blink). Hold KEY for 2 s during the countdown to start over.
+the next runs look for the block (ready LED: double blink). The robot forgets it at power-off or reset, so the first
+run after switching on always learns again (or hold KEY for 2 s during the countdown).
 
 A fault stops the motors and the LED flashes its number (`src/course.cpp`, `statusLed`). The two runs are kept in
 flash and can be read afterwards (`tools/read_run.py`).
@@ -40,7 +41,7 @@ every 33 ms (main loop, src/course.cpp)                          every 5 ms (tim
 | Odometry | Position from the wheel encoders, heading mainly from the gyro (98 %). The gyro's zero offset is re-learned whenever the car stands still, and measured again in each start countdown. | `lib/base/include/odometry.h` |
 | Route planning | A* on a 40 mm grid that prefers cells far from blocks; then shortcuts, corner smoothing and a speed factor per point (slow near blocks, near the edge and in bends). | `lib/course_nav/src/planner.cpp` |
 | Route following | Pure pursuit: steer on the circle arc through a point a little ahead on the route; that point is further ahead at speed. | `Navigator::track` in `lib/course_nav/src/navigator.cpp` |
-| Random-block detection | Run 2 only. A reading much shorter than expected, for 5 steps, whose block would stand on the route ahead. "Expected" is what run 1 read near the same pose (kept in flash), or the map where run 1 never was. | `Navigator::detectBlocks`, `src/run_record.cpp` |
+| Random-block detection | Run 2 only. A reading much shorter than expected, for 5 steps, whose block would stand on the route ahead. "Expected" is what run 1 read near the same pose (kept in flash until a restart), or the map where run 1 never was. | `Navigator::detectBlocks`, `src/run_record.cpp` |
 | Dodging | Slower where the block can only be seen late; backs off if it appears very close; side sensors correct drift in the narrow finish lane. | `include/course_params.h`, `Navigator` |
 | Wheel speed control | Feed-forward from a measured motor model plus a PI correction with anti-windup. | `lib/base/include/speed_controller.h`, `pid.h` |
 | Safety | A supervisor allows motion only while sensors are fresh and healthy; a fault stops the motors until the car has stood still and healthy again. The motors also stop on their own if the main loop stops sending commands for 150 ms. | `lib/base/include/reliability.h` |
