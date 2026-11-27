@@ -104,10 +104,9 @@ constexpr int MOTOR_SIGN_R = 1;
 // 4. Odometry and gyro (MPU6050)
 // =====================================================================================================================
 constexpr float GYRO_SIGN  = 1.0f;   // +1 when a positive gyro z is a counter-clockwise (left) turn
-constexpr float GYRO_SCALE = 1.0f;   // correction for the gyro's scale error (spin test, SETUP.md); 1 = not measured
+constexpr float GYRO_SCALE = 1.0f;   // scale correction (env:test_gyro_scale measured 1800.3 for 1800 deg)
 
 // Heading = 98 % gyro + 2 % encoders; when they disagree by more than 1 rad/s the wheels slip and are ignored.
-// Same values as FusedOdometry in sim/robot.py.
 constexpr float ODOM_GYRO_WEIGHT = 0.98f;
 constexpr float ODOM_SLIP_RATE_RAD_S = 1.0f;
 constexpr nav::OdomParams ODOM = {WHEEL_RADIUS_MM, WHEEL_TRACK_MM, COUNTS_PER_REV, ODOM_GYRO_WEIGHT,
@@ -124,6 +123,9 @@ constexpr nav::GyroBiasParams GYRO_BIAS = {
 // retried while the car stands still) if the samples spread too much (it moved) or the offset is implausibly large.
 constexpr uint32_t GYRO_SETTLE_MS = 2000;
 constexpr uint16_t GYRO_CALIBRATION_SAMPLES = 400;   // ~2 s at 200 Hz
+// Again before every run, in the start countdown: wait for the hand to leave the car, then average these.
+constexpr uint32_t GYRO_RECAL_DELAY_MS = 1000;
+constexpr uint16_t GYRO_RECAL_SAMPLES = 300;         // ~1.5 s
 constexpr float GYRO_CAL_MAX_STD_RAD_S = 0.01f;      // 0.6 deg/s; a still MPU6050 is ~0.002
 constexpr float GYRO_CAL_MAX_BIAS_RAD_S = 0.1f;      // 5.7 deg/s
 
@@ -131,7 +133,8 @@ constexpr float GYRO_CAL_MAX_BIAS_RAD_S = 0.1f;      // 5.7 deg/s
 // 5. Wheel speed control (200 Hz, lib/base/speed_controller.h)
 // =====================================================================================================================
 // Navigation speed scale: the Navigator's wheel commands are fractions of this. Not the motors' real top speed.
-constexpr float V_FULL_MM_S = 622.0f;
+// The Navigator's speed scale (wheel command 1.0). 680 laps the map in ~5.9 s (floor runs without the block, no hits).
+constexpr float V_FULL_MM_S = 680.0f;
 
 // Measured motor model (src/test_step.cpp, car on the floor): speed = gain * (duty - offset). The controller's
 // feed-forward is its inverse, duty = target / gain + offset. The right wheel is ~3 % faster, so each side has its own.

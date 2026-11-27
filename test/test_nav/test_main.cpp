@@ -348,14 +348,24 @@ void test_wall_clearance() {
 }
 
 void test_baseline_flags_only_what_is_new_on_the_path() {
-    // One clean-run entry around the pose (1250, 600) heading south: front sensor read 300 mm, the sides saw nothing.
-    static const BaselineEntry table[2] = {{(int16_t)lroundf(1250.0f / 30.0f), 20, (int8_t)lroundf(-1.5708f / 0.15f), {240, 60, 240}},
-                                                       {(int16_t)lroundf(1250.0f / 30.0f), 20, (int8_t)lroundf(-1.5708f / 0.15f), {240, 60, 240}}};
+    // Two reference-log records at the pose (1250, 600) heading south: front sensor read 300 mm, the sides saw nothing.
+    static uint8_t log[2 * Baseline::RECORD_BYTES];
+    for (int r = 0; r < 2; ++r) {
+        uint8_t* p = log + r * Baseline::RECORD_BYTES;
+        const int16_t pose[3] = {1250, 600, -1571};
+        for (int i = 0; i < 3; ++i) {
+            p[2 + 2 * i] = static_cast<uint8_t>(pose[i] & 0xFF);
+            p[3 + 2 * i] = static_cast<uint8_t>((pose[i] >> 8) & 0xFF);
+        }
+        p[13] = 240;
+        p[14] = 60;
+        p[15] = 240;
+    }
     auto run = [&](float frontMm) {
         gNav = Navigator(cfg::TOF_LAYOUT, randomBlockParams());
         gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
         Baseline b;
-        b.entries = table;
+        b.records = log;
         b.count = 2;
         gNav.setBaseline(b);
         gNav.start({300.0f, -80.0f, PI / 2}, 0.0f);
@@ -380,6 +390,38 @@ void test_one_random_block_is_found_and_only_one() {
     // a block outside the arena's right wing is not accepted (the left half is mapped)
     Block left[1] = {Block(400.0f, 1000.0f, 0.0f)};
     TEST_ASSERT_EQUAL_INT(0, detectedAt({500.0f, 800.0f, PI / 2}, left, 1));
+}
+
+// The block is trusted only once enough readings agree and the car is past it; then it stays trusted until restart.
+void test_trust_after_the_block_is_passed() {
+    Block one[1] = {Block(1600.0f, 700.0f, 0.0f)};
+    Block world[MAP_BLOCK_COUNT + 1];
+    buildMap(world);
+    world[MAP_BLOCK_COUNT] = one[0];
+    nav::NavParams p = randomBlockParams();
+    p.trustSupport = 3;
+    gNav = Navigator(cfg::TOF_LAYOUT, p);
+    gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
+    float t = 1.0f;
+    auto drive = [&](const Pose& pose, int steps) {
+        TEST_ASSERT_TRUE(gNav.reposition(pose, t));  // the pose jumps: plan from there
+        for (int i = 0; i < steps; ++i, t += 0.033f) {
+            float tof[cfg::TOF_COUNT], duty[2];
+            tofWithWalls(pose, world, MAP_BLOCK_COUNT + 1, tof);
+            gNav.step(pose, 0.0f, tof, t, duty);
+        }
+    };
+    gNav.start({300.0f, -80.0f, PI / 2}, 0.0f);
+    drive({1600.0f, 380.0f, -PI / 2}, 3);  // past that spot without having seen anything: no trust
+    TEST_ASSERT_FALSE(gNav.blockPassed());
+    drive({1350.0f, 700.0f, 0.0f}, 12);  // looking at the block, level with it
+    TEST_ASSERT_EQUAL_INT(1, gNav.unmappedBlocks());
+    TEST_ASSERT_TRUE(gNav.blockSupport() >= 3);
+    TEST_ASSERT_FALSE(gNav.blockPassed());  // confirmed but not behind yet
+    drive({1600.0f, 380.0f, -PI / 2}, 1);
+    TEST_ASSERT_TRUE(gNav.blockPassed());
+    gNav.start({300.0f, -80.0f, PI / 2}, t);  // the next run starts untrusted
+    TEST_ASSERT_FALSE(gNav.blockPassed());
 }
 
 // --- closed loop on the host: ideal differential-drive car, ToF from the real world -------------
@@ -544,6 +586,7 @@ int main() {
     RUN_TEST(test_one_random_block_is_found_and_only_one);
     RUN_TEST(test_wall_clearance);
     RUN_TEST(test_baseline_flags_only_what_is_new_on_the_path);
+    RUN_TEST(test_trust_after_the_block_is_passed);
     RUN_TEST(test_closed_loop_with_unmapped_blocks);
     RUN_TEST(test_localisation_against_drift_and_a_shifted_map);
     return UNITY_END();

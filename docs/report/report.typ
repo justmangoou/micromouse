@@ -609,7 +609,7 @@ cách, làm đường đi sượt T16 với một bánh cách 15 mm và robot đ
 
 == Các lượt chạy trên sa bàn
 
-Thư mục `data/` có bốn lượt chạy được đọc từ flash của robot (@tab-runs). Thời gian là mốc cuối cùng trong nhật ký; chiều dài đường đi được cộng từ các vị trí odometry trong nhật ký nên không phải số đo
+Thư mục `data/report/` có bốn lượt chạy được đọc từ flash của robot (@tab-runs). Thời gian là mốc cuối cùng trong nhật ký; chiều dài đường đi được cộng từ các vị trí odometry trong nhật ký nên không phải số đo
 trên sa bàn. Cột cuối chỉ áp công thức điểm tốc độ của thể lệ vào thời gian và không phải điểm thi thực tế.
 
 #figure(

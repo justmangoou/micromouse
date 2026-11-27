@@ -1,20 +1,24 @@
-"""Read the last two course runs from the robot's flash over ST-Link (OpenOCD from PlatformIO) and print them.
+"""Read the two course runs from the robot's flash over ST-Link (OpenOCD from PlatformIO) and print them.
 
-    python3 tools/read_run.py                 # both slots, oldest first: summary, 400 ms trace and the fast log
-    python3 tools/read_run.py --csv run       # also write run_<n>.csv for each slot's fast log (n = run number)
-    python3 tools/read_run.py --last          # only the newest run
+    python3 tools/read_run.py                 # both slots: summary, 400 ms trace and the fast log
+    python3 tools/read_run.py --csv data/x    # also write x_run1.csv and x_run2.csv (the fast logs)
+    python3 tools/analyze.py                  # read, compare and plot
 
-Flash layout (src/course.cpp): two slots of 5 KB at 0x0800D800 and 0x0800EC00; each run goes into the older slot.
-A slot is: 8-byte header (magic, run number) + CourseTrace at 0..511, then 16-byte fast-log records.
+Flash layout (src/run_record.cpp): two slots of 6 KB. 0x0800D000 holds run 1 (no random block; the detection reference
+when it finished cleanly), 0x0800E800 holds run 2. A slot is: 8-byte header (magic, run number) + Trace at 0..511, then up
+to 352 16-byte fast-log records. Wheel speeds are stored in 8 mm/s units. Slots written by earlier firmware are not
+readable with this tool.
 """
 import argparse, os, struct, subprocess, tempfile
 
 OPENOCD = os.path.expanduser("~/.platformio/packages/tool-openocd")
-SLOTS = (0x0800D800, 0x0800EC00)
-SLOT_BYTES = 5 * 1024
+SLOTS = (0x0800D000, 0x0800E800)
+SLOT_BYTES = 6 * 1024
 TRACE_BYTES = 512
 REC = 16
-MAGIC = 0xC0DE0002
+MAGIC = 0xC0DE0004
+REF_MAGIC = 0xC0DE0005  # run 1 that serves as the reference
+SPEED_UNIT = 8  # mm/s
 COLS = "ms x y th_mrad alpha_mrad tgtL tgtR measL measR tofR tofF tofL".split()
 
 
@@ -31,7 +35,7 @@ def dump(addr, size):
 
 def parse_slot(d):
     magic, seq = struct.unpack_from("<2I", d, 0)
-    valid = magic == MAGIC
+    valid = magic in (MAGIC, REF_MAGIC)
     t = {}
     if valid:
         o = 8
@@ -39,6 +43,7 @@ def parse_slot(d):
         t["state"], t["fault"], t["lastFault"], t["resetFlags"], t["extras"] = struct.unpack_from("<5B", d, o + 20)
         t["extraX"] = struct.unpack_from("<8h", d, o + 26)
         t["extraY"] = struct.unpack_from("<8h", d, o + 42)
+        t["reference"] = magic == REF_MAGIC
         t["x"] = struct.unpack_from("<48h", d, o + 58)
         t["y"] = struct.unpack_from("<48h", d, o + 154)
         t["th"] = struct.unpack_from("<48h", d, o + 250)
@@ -48,12 +53,13 @@ def parse_slot(d):
         if b[0:2] == b"\xff\xff":
             break
         ms, x, y, th, al, tl, tr, ml, mr, r, f, l = struct.unpack("<Hhhhb4b3B", b)
-        rows.append((ms, x, y, th, al * 10, tl * 5, tr * 5, ml * 5, mr * 5, r * 5, f * 5, l * 5))
+        rows.append((ms, x, y, th, al * 10, tl * SPEED_UNIT, tr * SPEED_UNIT, ml * SPEED_UNIT, mr * SPEED_UNIT, r * 5, f * 5, l * 5))
     return valid, seq, t, rows
 
 
 def show(name, valid, seq, t, rows, csv_prefix):
-    print(f"=== slot {name}: " + (f"run #{seq}" if valid else "no finished run (empty, or the run never ended)") + f", {len(rows)} log records")
+    kind = " (reference)" if valid and t["reference"] else ""
+    print(f"=== {name}{kind}: " + (f"#{seq}" if valid else "no finished run (empty, or the run never ended)") + f", {len(rows)} log records")
     if valid:
         print(f"  {t['doneAtMs']} ms, replans {t['replans']}, unmapped {t['unmapped']}, state {t['state']} fault {t['fault']} "
               f"lastFault {t['lastFault']}")
@@ -63,7 +69,7 @@ def show(name, valid, seq, t, rows, csv_prefix):
         for i in range(min(t["samples"], 48)):
             print(f"  {i:2d} ({t['x'][i]:5d},{t['y'][i]:5d}) th {t['th'][i] / 1000:6.3f}")
     if csv_prefix and rows:
-        path = f"{csv_prefix}_{seq if valid else name}.csv"
+        path = f"{csv_prefix}_{name}.csv"
         with open(path, "w") as f:
             f.write(",".join(COLS) + "\n")
             for r in rows:
@@ -78,11 +84,6 @@ def show(name, valid, seq, t, rows, csv_prefix):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", metavar="PREFIX")
-    ap.add_argument("--last", action="store_true")
     a = ap.parse_args()
-    slots = [parse_slot(dump(addr, SLOT_BYTES)) for addr in SLOTS]
-    order = sorted(range(2), key=lambda i: slots[i][1] if slots[i][0] else 0)
-    if a.last:
-        order = order[-1:]
-    for i in order:
-        show("AB"[i], *slots[i], a.csv)
+    for name, addr in zip(("run1", "run2"), SLOTS):
+        show(name, *parse_slot(dump(addr, SLOT_BYTES)), a.csv)

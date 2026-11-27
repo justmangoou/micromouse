@@ -23,7 +23,7 @@ clears the route; `hasRoute()` becomes false and `step()` returns zero commands.
 There is no automatic straight-line fallback.
 
 Random-block detection (`Navigator::detectBlocks`) compares each ToF reading with what it should be: the shortest
-reading clean runs recorded from the same spot (`setBaseline`, see `tools/make_baseline.py`), or the map's blocks and
+reading a run without the block recorded near the same pose (`setBaseline`), or the map's blocks and
 walls where there is no baseline. `DetectParams` holds its limits.
 
 The course's settings (start, finish, `NavParams`) live in `include/course_params.h`, the stored map in

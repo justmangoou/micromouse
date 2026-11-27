@@ -5,6 +5,10 @@
  *          ST-Link: the wheels run open loop for runMs and stop (or stop once the gyro yaw reaches targetDeg). With speedMmS > 0 the real wheel speed loop runs instead of open-loop duty. A left (counter-clockwise) turn is dutyA < 0, dutyB > 0.
  *          gyroYawDeg integrates the gyro (raw sign, cfg::GYRO_SCALE applied); encYawDeg is the yaw the encoders imply
  *          from cfg::ENC_SIGN_* and the wheel geometry. Positive = counter-clockwise. Write resetYaw = 1 to zero both.
+ *
+ * Gyro scale (env:test_gyro_scale): KEY turns the robot 5 full turns left by the gyro (after 3 s and a fresh offset
+ * measurement, LED solid). Measure how far it ended from where it started:
+ * GYRO_SCALE = (1800 + degrees past the start) / gyroYawDeg.
  */
 #include "board.h"
 #include "config.h"
@@ -41,12 +45,18 @@ namespace {
 // and stops without coasting past the target. It stops once it is within TURN_TOL_DEG and nearly stationary; if it
 // overshoots it turns back.
 constexpr float TURN_KP = 4.0f;        // mm/s per degree of error
-constexpr float TURN_V_MAX = 180.0f;   // mm/s per wheel (~250 deg/s of pivot; the gyro range is 500)
+constexpr float TURN_V_MAX = 180.0f;   // mm/s per wheel (~250 deg/s of pivot)
 constexpr float TURN_V_MIN = 60.0f;    // below this the wheels stall on the floor
 constexpr float TURN_TOL_DEG = 1.5f;
 constexpr float TURN_RATE_TOL = 12.0f; // deg/s that counts as stopped
 constexpr uint32_t TURN_SETTLE_MS = 150;
+#ifdef GYRO_SCALE_SPIN
+constexpr float TURN_DEFAULT_DEG = 1800.0f;  // 5 turns
+constexpr uint32_t TURN_TIMEOUT_MS = 30000;
+#else
+constexpr float TURN_DEFAULT_DEG = 90.0f;
 constexpr uint32_t TURN_TIMEOUT_MS = 5000;
+#endif
 
 I2cBus gI2c(&hi2c1);
 Mpu6050 gImu(gI2c);
@@ -94,7 +104,7 @@ int main() {
     float gyroYaw = 0;
     int32_t sumL = 0, sumR = 0;
     gSpin.stage = 3;
-    gSpin.turnTargetDeg = 90.0f;
+    gSpin.turnTargetDeg = TURN_DEFAULT_DEG;
     bool turning = false, settling = false;
     uint32_t turnStart = 0, settleAt = 0;
     while (true) {
@@ -141,6 +151,13 @@ int main() {
             ledStatusSet((now / 100) % 2 == 0);
             if (static_cast<int32_t>(now - startAt) >= 0) {
                 countdown = false;
+#ifdef GYRO_SCALE_SPIN
+                ledStatusSet(true);  // hands off: the offset is measured again just before turning
+                if (!gImu.calibrateGyroZ()) fail();
+                now = last = HAL_GetTick();
+                lastL = __HAL_TIM_GET_COUNTER(&htim2);
+                lastR = __HAL_TIM_GET_COUNTER(&htim3);
+#endif
                 gyroYaw = 0;
                 sumL = sumR = 0;
                 if (gSpin.buttonMode == 0) {

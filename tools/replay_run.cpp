@@ -4,8 +4,8 @@
 //   build:  g++ -std=gnu++17 -O1 -DNAV_LOW_MEMORY -I lib/course_nav/include -I lib/base/include -I include \
 //               tools/replay_run.cpp lib/course_nav/src/planner.cpp lib/course_nav/src/navigator.cpp \
 //               lib/course_nav/src/geometry.cpp -o /tmp/replay_run
-//   use:    /tmp/replay_run run.csv [baseline.bin]           blocks found (baseline: tools/make_baseline.py --bin)
-//           /tmp/replay_run run.csv [baseline.bin] --hits    also print every short reading's hit point
+//   use:    /tmp/replay_run run.csv [reference.csv]           blocks found (reference: the CSV of a run without the block)
+//           /tmp/replay_run run.csv [reference.csv] --hits    also print every short reading's hit point
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -37,38 +37,44 @@ std::vector<Record> loadRun(const char* path) {
     return rows;
 }
 
-std::vector<nav::BaselineEntry> loadBaseline(const char* path) {
-    std::vector<nav::BaselineEntry> entries;
-    FILE* f = fopen(path, "rb");
-    if (!f) return entries;
-    nav::BaselineEntry e;
-    while (fread(&e, sizeof e, 1, f) == 1) entries.push_back(e);
-    fclose(f);
-    return entries;
+// A reference run's CSV as the records the robot keeps in flash (see nav::Baseline).
+std::vector<uint8_t> loadReference(const char* path) {
+    std::vector<uint8_t> out;
+    for (const Record& r : loadRun(path)) {
+        uint8_t b[nav::Baseline::RECORD_BYTES] = {0};
+        const int pose[3] = {r.x, r.y, r.thMrad}, tof[3] = {r.tofR, r.tofF, r.tofL};
+        for (int i = 0; i < 3; ++i) {
+            b[2 + 2 * i] = static_cast<uint8_t>(pose[i] & 0xFF);
+            b[3 + 2 * i] = static_cast<uint8_t>((pose[i] >> 8) & 0xFF);
+            b[13 + i] = static_cast<uint8_t>(tof[i] / 5);
+        }
+        out.insert(out.end(), b, b + sizeof b);
+    }
+    return out;
 }
 
-nav::Navigator gNav(cfg::TOF_LAYOUT, course::navParams());
+nav::Navigator gNav(cfg::TOF_LAYOUT, course::navParams(true));
 
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s run.csv [baseline.bin] [--hits]\n", argv[0]);
+        fprintf(stderr, "usage: %s run.csv [reference.csv] [--hits]\n", argv[0]);
         return 2;
     }
     const std::vector<Record> run = loadRun(argv[1]);
-    std::vector<nav::BaselineEntry> baseline;
+    std::vector<uint8_t> baseline;
     bool printHits = false;
     for (int i = 2; i < argc; ++i) {
         if (strcmp(argv[i], "--hits") == 0) printHits = true;
-        else baseline = loadBaseline(argv[i]);
+        else baseline = loadReference(argv[i]);
     }
 
     gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
     if (!baseline.empty()) {
         nav::Baseline b;
-        b.entries = baseline.data();
-        b.count = (int)baseline.size();
+        b.records = baseline.data();
+        b.count = (int)(baseline.size() / nav::Baseline::RECORD_BYTES);
         gNav.setBaseline(b);
     }
     gNav.start({course::START_X, course::START_Y, course::START_TH}, 0.0f);

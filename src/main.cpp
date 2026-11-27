@@ -128,6 +128,20 @@ bool updateOdometry(nav::FusedOdometry& odo, const SensorStep& s) {
 
 void noteStall() { gStalled = true; }
 
+bool recalibrateGyro() {
+    // Blocks for ~1.5 s with the motors off. A reading that is not still enough is rejected and the old offset stays.
+    const bool ok = gStartup.imuOk && gImu.calibrateGyroZ(cfg::GYRO_RECAL_SAMPLES, cfg::GYRO_PERIOD_MS,
+                                                          cfg::GYRO_CAL_MAX_STD_RAD_S, cfg::GYRO_CAL_MAX_BIAS_RAD_S);
+    int32_t left, right;
+    motorTakeCounts(&left, &right);
+    // The control loop starts fresh, with the next step one full period from now: a step due at once would have dt = 0,
+    // which is a timing fault and cancels the countdown.
+    gNextGyro = gLastStep = HAL_GetTick();
+    gNextStep = gLastStep + cfg::CONTROL_PERIOD_MS;
+    noteStall();
+    return ok;
+}
+
 bool recoverSensors(const SensorStep& s) {
     static reliability::Qualification stationary;
     bool still = stationary.update(s.completedAt, gStartup.imuOk, s.countsL == 0 && s.countsR == 0);

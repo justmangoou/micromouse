@@ -4,8 +4,12 @@
  *          block if it is in the way.
  *
  * A run, as the operator sees it:
- *   power on -> sensors up, gyro calibrated (main.cpp) -> LED blinks slowly: ready
- *   press KEY -> 3 s countdown (LED blinks fast; the run record's flash slot is erased meanwhile)
+ *   power on -> sensors up, gyro calibrated (main.cpp) -> LED ready:
+ *       slow even blink: run 1, no random block on the course. A clean finish records the reference.
+ *       double blink:    run 2, a reference exists; the random block is looked for and avoided.
+ *   (hold KEY for 2 s during the countdown to forget the reference and start again from run 1)
+ *   press KEY -> 3 s countdown (LED blinks fast; the run record's flash slot is erased meanwhile). 1 s after KEY is let
+ *       go the gyro offset is measured again (LED solid, ~1.5 s, hands off)
  *   run: 30 Hz control step (odometry -> Navigator -> wheel targets), the 200 Hz speed loop drives the wheels
  *   over the finish line -> stop, LED solid. Carry it back to the start, press KEY: the next run starts.
  *
@@ -15,7 +19,6 @@
  */
 #include <cmath>
 
-#include "baseline.h"
 #include "board.h"
 #include "config.h"
 #include "course_params.h"
@@ -36,7 +39,9 @@ constexpr unsigned PRESS_STEPS = 3;              // KEY held this many control s
 constexpr uint32_t REPLAN_LEASE_MS = 600;        // how long the motors keep their command while a replan blocks the loop
 constexpr uint8_t FAULT_RESET_DURING_RUN = 8;    // LED code for "the chip reset in the middle of a run"
 
-nav::Navigator gNav(cfg::TOF_LAYOUT, course::navParams());  // ~36 KB of planner arrays: static on purpose
+constexpr unsigned CLEAR_STEPS = 60;             // KEY held this long (2 s) forgets the reference
+
+nav::Navigator gNav(cfg::TOF_LAYOUT, course::navParams(false));  // ~36 KB of planner arrays: static on purpose
 
 // Everything the run loop keeps between control steps.
 struct Course {
@@ -46,8 +51,12 @@ struct Course {
     bool routeReady = false;   // ... and is valid
     uint32_t lastPlanAt = 0;   // recovery planning is retried at most every RETRY_MS
     unsigned pressed = 0;      // control steps KEY has been held
+    bool waitRelease = false;  // KEY must be let go before it starts anything again
+    bool reachedFinish = false;
+    bool hasReference = false;  // run 2 mode
     bool countingDown = false;
     uint32_t startAt = 0;      // end of the countdown
+    bool gyroDue = false;      // the gyro has not been recalibrated in this countdown yet
     bool autoStart = false;    // re-armed after a finished run: start the countdown as soon as ready
     uint8_t ledFault = 0;      // the last fault, shown until the next run starts
     State previousState = State::Recovering;
@@ -55,13 +64,12 @@ struct Course {
 
 // ---- Helpers ----------------------------------------------------------------------------------------------------------
 
-void loadBaseline() {
-    nav::Baseline b;
-    b.entries = BASE_TABLE;
-    b.count = BASE_N;
-    b.cell = BASE_CELL;
-    b.bin = BASE_BIN;
-    gNav.setBaseline(b);
+// Run 1 or run 2: with a reference in flash the Navigator looks for the random block against it.
+void applyMode(Course& c) {
+    const nav::Baseline reference = runrec::reference();
+    c.hasReference = reference.records != nullptr;
+    gNav.setParams(course::navParams(c.hasReference));
+    gNav.setBaseline(reference);
 }
 
 // The course's sensor check. The floor is open, so "nothing in range" is a normal ToF reading: a sensor only has to be
@@ -83,7 +91,7 @@ bool atFinish(const math::Pose& p) {
 
 float secondsSinceStart(const Course& c, uint32_t now) { return (now - c.supervisor.startedAt()) * 0.001f; }
 
-// Status LED: solid = running or finished, slow blink = ready, fast blink = countdown, N short flashes then a pause =
+// Status LED: solid = running or finished, slow blink = ready for run 1, double blink = ready for run 2, fast blink = countdown, N short flashes then a pause =
 // fault N (1 sensor, 2 timing, 3 command expired, 4 no route, 5 pose, 6 configuration, 7 timeout, 8 reset during a run).
 bool statusLed(Course& c, uint32_t now) {
     const Supervisor& sup = c.supervisor;
@@ -99,6 +107,7 @@ bool statusLed(Course& c, uint32_t now) {
         return t < code * 300u && (t % 300u) < 150u;
     }
     if (sup.state() == State::Done) return true;
+    if (c.hasReference) return now % 1200 < 120 || (now % 1200 >= 240 && now % 1200 < 360);
     return (now / 500) % 2 == 0;
 }
 
@@ -120,10 +129,20 @@ void rearmIfPressed(Course& c, State before) {
 // the run starts. `issue` becomes NoRoute if the start plan fails.
 bool handleStart(Course& c, const SensorStep& s, Fault& issue) {
     if (c.supervisor.state() != State::Ready) c.countingDown = false;
-    if (!c.countingDown && c.supervisor.state() == State::Ready && (c.pressed >= PRESS_STEPS || c.autoStart)) {
+    if (c.countingDown && c.pressed >= CLEAR_STEPS) {  // KEY still held: forget the reference, back to run 1
+        runrec::clearReference();
+        applyMode(c);
+        noteStall();  // the page erase blocked the loop
+        c.countingDown = false;
+        c.waitRelease = true;
+    }
+    if (c.pressed == 0) c.waitRelease = false;
+    if (!c.waitRelease && !c.countingDown && c.supervisor.state() == State::Ready &&
+        (c.pressed >= PRESS_STEPS || c.autoStart)) {
         c.autoStart = false;
         c.countingDown = true;
         c.startAt = s.completedAt + COUNTDOWN_MS;
+        c.gyroDue = true;
         runrec::prepare();
     }
     const bool startNow = c.countingDown && static_cast<int32_t>(s.completedAt - c.startAt) >= 0;
@@ -132,6 +151,8 @@ bool handleStart(Course& c, const SensorStep& s, Fault& issue) {
 
     // A fresh start: whatever the wheels or the gyro did while the car was being placed is dropped.
     c.countingDown = false;
+    c.reachedFinish = false;
+    applyMode(c);  // a run 1 that just finished has left a reference
     c.odometry.reset({course::START_X, course::START_Y, course::START_TH});
     c.routeReady = gNav.start(c.odometry.pose, 0.0f);
     c.planned = true;
@@ -139,6 +160,18 @@ bool handleStart(Course& c, const SensorStep& s, Fault& issue) {
     runrec::startRun();
     if (issue == Fault::None && !c.routeReady) issue = Fault::NoRoute;
     return true;
+}
+
+// In the countdown, once KEY has been let go for a moment: measure the gyro's offset again with the car untouched.
+// Blocks the loop; the start is pushed back if less than 200 ms of the countdown would be left.
+void recalibrateIfDue(Course& c, const SensorStep& s) {
+    if (!c.countingDown || !c.gyroDue || c.pressed != 0 ||
+        s.completedAt - (c.startAt - COUNTDOWN_MS) < cfg::GYRO_RECAL_DELAY_MS)
+        return;
+    c.gyroDue = false;
+    ledStatusSet(true);  // solid: hands off
+    recalibrateGyro();
+    if (static_cast<int32_t>(c.startAt - HAL_GetTick()) < 200) c.startAt = HAL_GetTick() + 200;
 }
 
 // Stopped by a fault: try to recover the sensors, and plan again once they are healthy.
@@ -170,6 +203,7 @@ void driveStep(Course& c, SensorStep& s, State before, float targetMmS[2]) {
     // A replan runs the planner inside this step and blocks the loop: keep the motors' command alive meanwhile.
     if (gNav.replanDue(t)) motorExtendLease(REPLAN_LEASE_MS);
     // gNav.localize(c.odometry.pose, s.tof, t);  // pose correction: off, see docs/DECISIONS.md
+    gNav.keepLane(c.odometry.pose, s.tof);
     gNav.step(c.odometry.pose, c.odometry.v, s.tof, t, duty);
     if (gNav.replans() != replansBefore) {
         // The sensor snapshot is now older than usual. That is expected after a plan, not a fault.
@@ -190,6 +224,7 @@ void driveStep(Course& c, SensorStep& s, State before, float targetMmS[2]) {
         c.supervisor.update(HAL_GetTick(), issue, false, false);
     } else if (atFinish(c.odometry.pose)) {
         motorEnable(false);
+        c.reachedFinish = true;
         c.supervisor.done();
     } else {
         targetMmS[0] = duty[0] * cfg::V_FULL_MM_S;
@@ -211,7 +246,10 @@ void recordStep(Course& c, const SensorStep& s, const float targetMmS[2]) {
         motorEnable(false);
         noteStall();
     }
-    if (runrec::saveIfEnded(sup)) noteStall();  // the flash write blocks the loop for a moment
+    if (runrec::saveIfEnded(sup, c.reachedFinish)) {
+        noteStall();  // the flash write blocks the loop for a moment
+        applyMode(c);
+    }
     c.previousState = sup.state();
 }
 
@@ -221,7 +259,7 @@ void runMode(const StartupStatus&) {
     static Course c;
     if (runrec::boot()) c.ledFault = FAULT_RESET_DURING_RUN;
     gNav.init(MAP_BLOCKS, MAP_BLOCK_COUNT);
-    loadBaseline();
+    applyMode(c);
     c.odometry.reset({course::START_X, course::START_Y, course::START_TH});
     if (!gNav.configurationValid()) c.supervisor.latch(Fault::Configuration);
     c.lastPlanAt = HAL_GetTick() - reliability::RETRY_MS;
@@ -244,6 +282,9 @@ void runMode(const StartupStatus&) {
         c.pressed = buttonPressed() ? c.pressed + 1 : 0;
         rearmIfPressed(c, before);
         const bool startNow = handleStart(c, s, issue);
+        // The start plan blocked the loop, so this step's sensor snapshot is old. Expected, not a timing fault (without
+        // this the run opened with ~0.9 s of fault recovery before the wheels moved).
+        if (startNow) s.maxAgeMs = cfg::STALL_MAX_AGE_MS;
 
         // 3. Let the supervisor decide the state; stop at the time limit
         c.supervisor.update(s.completedAt, issue, s.countsL == 0 && s.countsR == 0, startNow);
@@ -258,5 +299,6 @@ void runMode(const StartupStatus&) {
 
         // 5. Record
         recordStep(c, s, targetMmS);
+        recalibrateIfDue(c, s);  // last: the snapshot above is old once this has run
     }
 }

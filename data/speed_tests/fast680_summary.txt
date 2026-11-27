@@ -1,0 +1,54 @@
+=== slot B: run #2, 173 log records
+  5863 ms, replans 1, unmapped 0, state 3 fault 0 lastFault 0
+   0 (  300,  -80) th  1.570
+   1 (  299,   30) th  1.639
+   2 (  189,  261) th  2.205
+   3 (  171,  436) th  0.996
+   4 (  323,  614) th  0.825
+   5 (  486,  808) th  1.034
+   6 (  629,  906) th -0.008
+   7 (  826,  854) th -0.168
+   8 ( 1019,  805) th -0.575
+   9 ( 1156,  711) th -0.445
+  10 ( 1257,  625) th -1.146
+  11 ( 1285,  485) th -1.509
+  12 ( 1285,  259) th -1.588
+  13 ( 1281,   46) th -1.582
+  14 ( 1280,  -98) th -1.578
+  wrote /private/tmp/claude-501/-Users-justmango-Documents-micromouse/73f2ba10-b7d6-45f7-88c6-d6b7ac607ddb/scratchpad/fast/run_2.csv
+=== slot C: run #3, 174 log records
+  5896 ms, replans 1, unmapped 0, state 3 fault 0 lastFault 0
+   0 (  300,  -80) th  1.570
+   1 (  302,   29) th  1.595
+   2 (  195,  257) th  2.234
+   3 (  168,  431) th  1.031
+   4 (  316,  607) th  0.815
+   5 (  484,  801) th  1.037
+   6 (  624,  907) th  0.058
+   7 (  819,  856) th -0.215
+   8 ( 1013,  810) th -0.559
+   9 ( 1150,  713) th -0.461
+  10 ( 1254,  630) th -1.113
+  11 ( 1284,  498) th -1.494
+  12 ( 1285,  273) th -1.584
+  13 ( 1282,   59) th -1.584
+  14 ( 1280, -101) th -1.579
+  wrote /private/tmp/claude-501/-Users-justmango-Documents-micromouse/73f2ba10-b7d6-45f7-88c6-d6b7ac607ddb/scratchpad/fast/run_3.csv
+=== slot A: run #4, 173 log records
+  5863 ms, replans 1, unmapped 0, state 3 fault 0 lastFault 0
+   0 (  300,  -80) th  1.570
+   1 (  297,   30) th  1.680
+   2 (  188,  263) th  2.205
+   3 (  171,  436) th  0.987
+   4 (  325,  617) th  0.819
+   5 (  491,  814) th  1.002
+   6 (  638,  904) th -0.052
+   7 (  839,  851) th -0.141
+   8 ( 1029,  799) th -0.609
+   9 ( 1157,  710) th -0.439
+  10 ( 1258,  623) th -1.173
+  11 ( 1285,  483) th -1.507
+  12 ( 1285,  256) th -1.585
+  13 ( 1282,   43) th -1.581
+  14 ( 1280, -101) th -1.582
+  wrote /private/tmp/claude-501/-Users-justmango-Documents-micromouse/73f2ba10-b7d6-45f7-88c6-d6b7ac607ddb/scratchpad/fast/run_4.csv

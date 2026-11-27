@@ -13,7 +13,7 @@ public:
     // addr7: 0x68 with AD0 low, 0x69 with AD0 high
     explicit Mpu6050(I2cBus& bus, uint8_t addr7 = 0x68) : bus_(bus), addr7_(addr7) {}
 
-    // Reset, wake, 42 Hz low-pass, 200 Hz sample rate, +-500 deg/s. False if the chip does not answer.
+    // Reset, wake, 42 Hz low-pass, 200 Hz sample rate, +-1000 deg/s. False if the chip does not answer.
     // Preserves the previous calibrated bias when reinitializing after an outage.
     bool init();
 

@@ -1,6 +1,7 @@
 /**
  * @file    navigator.cpp
- * @brief   Navigator: random-block detection, replanning and pure-pursuit route following. See navigator.h.
+ * @brief   Navigator: random-block detection, replanning, pure-pursuit route following and drift correction.
+ *          See navigator.h.
  */
 #include "navigator.h"
 
@@ -31,8 +32,19 @@ constexpr float OFF_ROUTE_REPLAN_S = 0.5f;    // ... at most this often
 constexpr float PIVOT_ALPHA_RAD = 1.2f;       // target more than this far to the side: turn on the spot first
 constexpr float PIVOT_DUTY = 0.45f;
 constexpr float MIN_HEADING_FACTOR = 0.35f;   // speed factor cos(alpha) never drops below this
-constexpr float CAUTION_X_MM = 1050.0f;       // params.caution applies right of this
+constexpr float RIGHT_WING_X_MM = 1050.0f;    // right of this: the block can be passed, softProfile has no floor
 constexpr float MIN_SPEED_FRACTION = 0.22f;   // of vFull: keeps the motors out of their dead band
+
+// Drift correction in the finish lane (keepLane)
+constexpr float LANE_MIN_X_MM = 1450.0f;      // the lane between T16 and T17 ...
+constexpr float LANE_MAX_Y_MM = 400.0f;       // ... from here down to the finish line
+constexpr float LANE_HEADING_SIN = -0.9f;     // only while driving nearly straight down
+
+// Reference run (baselineAt)
+constexpr int NEAR_MM = 45;                   // a record this close in x and y ...
+constexpr int NEAR_MRAD = 220;                // ... and in heading was taken "here"
+constexpr int FRONT_KEEP = 24;                // front readings kept for the median
+constexpr int FRONT_SPURIOUS_5MM = 16;        // 80 mm: nothing is this close ahead on the route
 
 // Pose correction (localize)
 constexpr float LOC_MAX_MM = 220.0f;          // beyond this the floor and the sensor's compression spoil the reading
@@ -51,6 +63,7 @@ bool Navigator::configurationValid() const {
            std::isfinite(p.speed) && p.speed > 0 && p.speed <= 1 &&
            std::isfinite(p.lookahead) && p.lookahead > 0 &&
            std::isfinite(p.caution) && p.caution > 0 && p.caution <= 1 &&
+           std::isfinite(p.trustedCaution) && p.trustedCaution > 0 && p.trustedCaution <= 1 &&
            std::isfinite(p.alertSpeed) && p.alertSpeed > 0 && p.alertSpeed <= 1;
 }
 
@@ -60,6 +73,10 @@ bool Navigator::start(const math::Pose& pose, float t) {
     planner_.clearExtras();
     for (auto& streak : streak_) streak = 0;
     for (auto& hits : hits_) hits = 0;
+    support_ = 0;
+    laneShifted_ = 0.0f;
+    backing_ = 0;
+    passed_ = false;
     alertUntil_ = -1.0f;
     lastLocalizeT_ = -1.0f;
     locOffset_ = {0, 0};
@@ -101,7 +118,22 @@ void Navigator::step(const math::Pose& pose, float speed, const float tof[], flo
             path_.n = 0;
             return;
         }
-    detectBlocks(pose, tof, t);
+    if (!passed_) detectBlocks(pose, tof, t);  // after that, a replan could only cost time
+    updateTrust(pose);
+    // A new block very close: brake and back off first (NavParams::backRange). This comes before the replan, which holds
+    // the last wheel command for ~0.1 s.
+    if (backing_ > 0) {
+        --backing_;
+        duty[0] = duty[1] = -params_.backDuty;
+        return;
+    }
+    if (needReplan_ && planner_.numExtras() > 0 && hits_[0] == 1 &&
+        math::distance({pose.x, pose.y}, planner_.extra(0)) < params_.backRange) {
+        backing_ = params_.backSteps - 1;
+        hits_[0] = 2;  // back off only once for this block
+        duty[0] = duty[1] = -params_.backDuty;
+        return;
+    }
     if (replanDue(t)) replan({pose.x, pose.y}, t);
     if (hasRoute()) track(pose, speed, t, duty);
 }
@@ -119,7 +151,7 @@ math::Vec2 Navigator::sensorOrigin(const math::Pose& pose, int sensor) const {
 void Navigator::detectBlocks(const math::Pose& pose, const float tof[], float t) {
     const DetectParams& d = params_.detect;
     float shortest[3];
-    const bool covered = baselineAt(pose, shortest);  // clean runs were recorded here
+    const bool covered = baselineAt(pose, shortest);  // the reference run passed here
 
     for (int k = 0; k < layout_.count; k++) {
         // 1. Is this reading short?
@@ -134,20 +166,45 @@ void Navigator::detectBlocks(const math::Pose& pose, const float tof[], float t)
 
         // 2. Has it been short long enough?
         streak_[k] = isShort ? (uint8_t)(streak_[k] < 250 ? streak_[k] + 1 : 250) : 0;
-        if (streak_[k] < d.confirmSteps) continue;
+        if (!isShort) continue;
 
-        // 3. Is the hit point a plausible new block in our way?
+        // 3. Where would the block be? The sensor sees the near face, so the centre is half a block further than the
+        // reading. It sees a cone, though, not a line: of the directions in the cone, take the one that puts the block
+        // closest to the route (a corner caught by a 45-degree sensor otherwise lands 10-20 cm off).
         const math::Vec2 o = sensorOrigin(pose, k);
-        const float a = pose.th + layout_.sensors[k].angle;
-        const math::Vec2 dir = {cosf(a), sinf(a)};
-        const math::Vec2 hit = {o.x + z * dir.x, o.y + z * dir.y};
-        if (!isNewBlockHit(hit, covered)) continue;
+        math::Vec2 hit = o, centre = o;
+        float offRoute = 2.0e9f;
+        for (int f = 0; f < layout_.rayCount; ++f) {
+            const float a = pose.th + layout_.sensors[k].angle + layout_.rays[f];
+            const math::Vec2 dir = {cosf(a), sinf(a)};
+            const math::Vec2 c = {o.x + (z + BLOCK_HALF) * dir.x, o.y + (z + BLOCK_HALF) * dir.y};
+            const float away = distanceToRoute(c);
+            if (away < offRoute) {
+                offRoute = away;
+                centre = c;
+                hit = {o.x + z * dir.x, o.y + z * dir.y};
+            }
+        }
+        // Trust in a block already found: any short reading that lands on it, on the route or not (once the route goes
+        // around the block, the new-block filters below reject further readings of it).
+        if (planner_.numExtras() > 0 && support_ < 60000 && math::distance(planner_.extra(0), centre) < MERGE_RADIUS_MM)
+            ++support_;
 
-        // 4. The sensor sees the near face: the centre is half a block further along the ray.
-        const math::Vec2 centre = {o.x + (z + BLOCK_HALF) * dir.x, o.y + (z + BLOCK_HALF) * dir.y};
-        if (centre.x > d.maxCentreX || centre.y < d.minCentreY) continue;
+        // 4. Is the hit point a plausible new block in our way?
+        if (streak_[k] < d.confirmSteps || !isNewBlockHit(hit, covered)) continue;
+        if (centre.x > d.maxCentreX || centre.x < d.minCentreX || centre.y < d.minCentreY) continue;
+        // A side sensor catches a block's corner, which puts the estimate too far toward the forbidden middle.
+        centre.x = fmaxf(centre.x, d.clampCentreX);
+        if (d.centreReach < 1.0e8f && !nearRouteAhead(centre, d.centreReach)) continue;  // not blocking the way
         addOrMergeBlock(centre, t);
     }
+}
+
+// Latches once the block is well supported and the car is past it in the right wing. A run where the block is never
+// seen, or seen only briefly, keeps the cautious speed.
+void Navigator::updateTrust(const math::Pose& pose) {
+    if (passed_ || params_.trustSupport <= 0 || planner_.numExtras() == 0 || support_ < params_.trustSupport) return;
+    passed_ = pose.x > RIGHT_WING_X_MM && pose.y < planner_.extra(0).y - params_.trustPassMm;
 }
 
 // What the sensor should read according to the map: the nearest mapped block over the sensor's rays, or the nearest
@@ -168,45 +225,54 @@ float Navigator::predictedRange(const math::Pose& pose, int sensor) const {
     return expected;
 }
 
-// The shortest clean-run reading of each sensor near this pose (x, y within one cell, heading within one bin). False when
-// fewer than two baseline cells are near: then the map is the reference.
+// What each sensor read near this pose in the reference run: its shortest reading, in mm. The front sensor throws random
+// 30-80 mm readings on open floor, and one of them in the reference would hide a real block there: where its shortest is
+// that small, its median is used instead. False when fewer than two records are near: then the map is the reference.
+// Integer work only: it scans the whole log.
 bool Navigator::baselineAt(const math::Pose& pose, float shortest[3]) const {
-    if (!baseline_.entries) return false;
-    const int cx = (int)lroundf(pose.x / baseline_.cell);
-    const int cy = (int)lroundf(pose.y / baseline_.cell);
-    const int bin = (int)lroundf(pose.th / baseline_.bin);
-    const int bins = (int)lroundf(6.2831853f / baseline_.bin);
-    int found = 0;
-    for (int k = 0; k < 3; ++k) shortest[k] = 1.0e9f;
-    for (int i = 0; i < baseline_.count; ++i) {
-        const BaselineEntry& e = baseline_.entries[i];
-        int dBin = e.bin - bin;
-        while (dBin > bins / 2) dBin -= bins;
-        while (dBin < -bins / 2) dBin += bins;
-        if (abs(e.cx - cx) > 1 || abs(e.cy - cy) > 1 || abs(dBin) > 1) continue;
+    if (!baseline_.records) return false;
+    const int px = (int)pose.x, py = (int)pose.y, pth = (int)(pose.th * 1000.0f);
+    const auto at = [](const uint8_t* p) { return (int)(int16_t)(p[0] | (p[1] << 8)); };
+    uint8_t front[FRONT_KEEP];  // front readings in rising order
+    int found = 0, kept = 0, low[3] = {255, 255, 255};
+    const uint8_t* r = baseline_.records;
+    for (int i = 0; i < baseline_.count; ++i, r += Baseline::RECORD_BYTES) {
+        if (abs(at(r + 2) - px) > NEAR_MM || abs(at(r + 4) - py) > NEAR_MM) continue;
+        int dth = (at(r + 6) - pth) % 6283;
+        if (dth > 3141) dth -= 6283;
+        if (dth < -3141) dth += 6283;
+        if (abs(dth) > NEAR_MRAD) continue;
         ++found;
-        for (int k = 0; k < 3; ++k) shortest[k] = fminf(shortest[k], e.range5mm[k] * 5.0f);
+        for (int k = 0; k < 3; ++k)
+            if (r[13 + k] < low[k]) low[k] = r[13 + k];
+        if (kept < FRONT_KEEP) {
+            int j = kept++;
+            for (; j > 0 && front[j - 1] > r[14]; --j) front[j] = front[j - 1];
+            front[j] = r[14];
+        }
     }
-    return found >= 2;
+    if (found < 2) return false;
+    if (low[1] < FRONT_SPURIOUS_5MM) low[1] = front[kept / 2];
+    for (int k = 0; k < 3; ++k) shortest[k] = low[k] * 5.0f;
+    return true;
 }
 
 bool Navigator::isNewBlockHit(math::Vec2 hit, bool baselineCovered) const {
     const DetectParams& d = params_.detect;
     if (hit.x < d.minHitX) return false;                                    // the mapped part of the arena
-    if (d.pathReach < 1.0e8f && !nearRouteAhead(hit)) return false;         // not in our way: no reason to replan
+    if (d.pathReach < 1.0e8f && !nearRouteAhead(hit, d.pathReach)) return false;         // not in our way: no reason to replan
     if (baselineCovered) return true;                                       // the baseline already cancels walls and blocks
     if (wallClearance(hit) < d.wallMargin) return false;                    // a wall, seen through pose error
     if (planner_.mapClearance(hit) < d.mapMargin) return false;             // a mapped block, seen through pose/map error
     return true;
 }
 
-bool Navigator::nearRouteAhead(math::Vec2 p) const {
-    if (path_.n < 2) return false;
-    const DetectParams& d = params_.detect;
-    const float s0 = path_.s[idx_];
-    for (int i = idx_; i < path_.n && path_.s[i] <= s0 + d.pathAhead; ++i)
-        if (math::distance(path_.p[i], p) <= d.pathReach) return true;
-    return false;
+float Navigator::distanceToRoute(math::Vec2 p) const {
+    float best = 1.0e9f;
+    if (path_.n < 2) return best;
+    const float end = path_.s[idx_] + params_.detect.pathAhead;
+    for (int i = idx_; i < path_.n && path_.s[i] <= end; ++i) best = fminf(best, math::distance(path_.p[i], p));
+    return best;
 }
 
 void Navigator::addOrMergeBlock(math::Vec2 centre, float t) {
@@ -283,17 +349,33 @@ void Navigator::track(const math::Pose& pose, float speed, float t, float duty[2
 float Navigator::targetSpeed(const math::Pose& pose, float alpha, float t) const {
     const NavParams& p = params_;
     float baseFactor = path_.v[idx_];
-    if (p.softProfile && pose.x <= CAUTION_X_MM) {
+    if (p.softProfile && pose.x <= RIGHT_WING_X_MM) {
         baseFactor = fmaxf(0.50f, baseFactor);
     }
     const float routeFactor = p.softProfile ? sqrtf(baseFactor) : baseFactor;
     float v = p.speed * p.vFull * routeFactor * fmaxf(MIN_HEADING_FACTOR, cosf(alpha));
-    if (pose.x > CAUTION_X_MM) v *= p.caution;
+    if (pose.x > p.cautionX) v *= passed_ ? p.trustedCaution : p.caution;
     if (t < alertUntil_) v *= p.alertSpeed;
     const float vMin = MIN_SPEED_FRACTION * p.vFull;
     if (v < vMin) v = vMin;
     if (pose.y < p.finishY && v < p.finishSpeed * p.vFull) v = p.finishSpeed * p.vFull;  // no crawling onto the line
     return v;
+}
+
+// Driving down (-y), the right-hand sensor looks toward -x (T16) and the left-hand one toward +x (T17). Something close on
+// one side means the car is nearer to it than the estimate says.
+bool Navigator::keepLane(math::Pose& pose, const float tof[]) {
+    const NavParams& p = params_;
+    if (p.laneClose <= 0 || planner_.numExtras() == 0 || pose.x < LANE_MIN_X_MM || pose.y > LANE_MAX_Y_MM ||
+        pose.y < 0.0f || sinf(pose.th) > LANE_HEADING_SIN)
+        return false;
+    const bool right = tof[0] < p.laneClose, left = tof[layout_.count - 1] < p.laneClose;
+    if (right == left) return false;
+    const float step = right ? -p.laneStep : p.laneStep;  // the estimate moves toward what is close
+    if (fabsf(laneShifted_ + step) > p.laneLimit) return false;
+    laneShifted_ += step;
+    pose.x += step;
+    return true;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

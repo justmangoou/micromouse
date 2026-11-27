@@ -1,7 +1,7 @@
 /**
  * @file    geometry.h
  * @brief   Arena geometry shared by the planner, the navigator and the host tests: blocks, ray-casting and the track.
- *          Units: mm, rad. Mirrors sim/config.py and sim/course/arena.py. Generic helpers (math::Vec2, math::Pose,
+ *          Units: mm, rad. Generic helpers (math::Vec2, math::Pose,
  *          math::wrap) are in math_util.h.
  */
 #pragma once
@@ -44,7 +44,7 @@ bool insideTrack(math::Vec2 p, float margin);
 
 // How many mm of margin this point (assumed on the track) still has before insideTrack would call it off-track --
 // i.e. its distance to the tape boundary. Found by bisection on insideTrack rather than deriving the U-shaped
-// polygon's edges by hand (it is a union of 3 rectangles, not one convex shape). Port of arena.edge_margin.
+// polygon's edges by hand (it is a union of 3 rectangles, not one convex shape).
 float edgeMargin(math::Vec2 p, float hi = 300.0f, int iters = 10);
 
 }  // namespace nav

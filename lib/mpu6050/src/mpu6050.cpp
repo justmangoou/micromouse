@@ -22,9 +22,10 @@ constexpr uint8_t REG_WHO_AM_I     = 0x75;
 // WHO_AM_I stays 0x68 regardless of AD0 (bus address 0x68 or 0x69).
 constexpr uint8_t WHO_AM_I_VAL     = 0x68;
 
-// Scale factors: ±500 dps -> 65.5 LSB/(deg/s) -> rad/s direct factor
-constexpr float SCALE_500DPS       = 65.5f;
-constexpr float GYRO_Z_TO_RAD_S    = math::toRadian(1.0f) / SCALE_500DPS;
+// Scale factors: ±1000 dps -> 32.8 LSB/(deg/s) -> rad/s direct factor. Not ±500: a turn on the spot passes 600 deg/s,
+// and the clipped readings put the heading 5-10 deg wrong for the rest of the run.
+constexpr float SCALE_1000DPS      = 32.8f;
+constexpr float GYRO_Z_TO_RAD_S    = math::toRadian(1.0f) / SCALE_1000DPS;
 
 } // namespace
 
@@ -51,8 +52,8 @@ bool Mpu6050::init() {
     // Sample rate = 1kHz / (1 + 4) = 200 Hz
     if (!write(REG_SMPLRT_DIV, 0x04)) return false;
 
-    // Gyro full scale: ±500 deg/s (FS_SEL = 1 -> bits [4:3] = 01 -> 0x08)
-    if (!write(REG_GYRO_CONFIG, 0x08)) return false;
+    // Gyro full scale: ±1000 deg/s (FS_SEL = 2 -> bits [4:3] = 10 -> 0x10)
+    if (!write(REG_GYRO_CONFIG, 0x10)) return false;
 
     HAL_Delay(10);
     initialized_ = true;

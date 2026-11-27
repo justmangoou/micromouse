@@ -1,7 +1,7 @@
 /**
  * @file    planner.h
- * @brief   Global planner: clearance-weighted A* on a 20 mm grid, string pulling, corner smoothing, resampling. Port
- *          of AStarDriver._plan in sim/course/planner.py. All memory is static (~36 KB, or ~10 KB with NAV_LOW_MEMORY), no allocation.
+ * @brief   Global planner: clearance-weighted A* on a 20 mm grid, string pulling, corner smoothing, resampling.
+ *          All memory is static (~36 KB, or ~10 KB with NAV_LOW_MEMORY), no allocation.
  */
 #pragma once
 
@@ -11,8 +11,8 @@
 
 namespace nav {
 
-// Memory profile. The default is the full-resolution planner that matches sim/course/planner.py (~46 KB with the
-// navigator's path). A target with 20 KB of RAM (the Blue Pill) builds with -DNAV_LOW_MEMORY: 40 mm cells, shorter path
+// Memory profile. The default is the full-resolution planner (~46 KB with the navigator's
+// path). A target with 20 KB of RAM (the Blue Pill) builds with -DNAV_LOW_MEMORY: 40 mm cells, shorter path
 // and open list, ~13 KB. Same algorithm, coarser grid; the string pulling and smoothing recover most of the resolution.
 #ifdef NAV_LOW_MEMORY
 constexpr float GRID_RES = 40.0f;     // grid cell, mm
@@ -49,9 +49,8 @@ constexpr float R_PRUNE = 110.0f;   // shortcuts must keep this much clearance
 // drifted further than that, by slowing it down near the boundary so pure pursuit has more time to correct.
 constexpr float R_EDGE = 70.0f;
 constexpr float EDGE_SLOW_START = 220.0f;  // mm of edge margin at which the speed factor starts dropping below 1
-constexpr float DISC_R = 110.0f;    // an unmapped block is a disc around its estimated centre. Bigger than the
-                                    // block's own 50 mm half-width: the single-ray near-face + half-block-behind
-                                    // centre estimate is biased for oblique hits, so this buys back margin for that
+constexpr float DISC_R = 50.0f;     // an unmapped block is a disc around its estimated centre, its half-width. Larger
+                                    // (it was 110) closed the 22 cm gap below T14 and sent the car round over the top
 constexpr float CENTERING = 6.0f;
 
 constexpr math::Vec2 GOAL = {1320.0f, -120.0f};  // only the straight-line fallback; A* ends anywhere on the finish line

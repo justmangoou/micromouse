@@ -34,13 +34,15 @@ volatile Trace gTrace = {};
 
 // ---- Flash slots ------------------------------------------------------------------------------------------------------
 
-constexpr uint32_t SLOT_ADDR[2] = {0x0800D800, 0x0800EC00};
-constexpr uint32_t SLOT_PAGES = 5;
+// The last 12 KB of flash. The program must end below SLOT_ADDR[0]: flash_guard.ld fails the link otherwise.
+constexpr uint32_t SLOT_ADDR[2] = {0x0800D000, 0x0800E800};  // run 1 (the reference), run 2
+constexpr uint32_t SLOT_PAGES = 6;
 constexpr uint32_t PAGE_BYTES = 1024;
 constexpr uint32_t TRACE_BYTES = 512;  // header + trace, at the start of the slot
-constexpr uint32_t RECORD_BYTES = 16;
-constexpr uint32_t MAX_RECORDS = (SLOT_PAGES * PAGE_BYTES - TRACE_BYTES) / RECORD_BYTES;  // 288
-constexpr uint32_t SLOT_MAGIC = 0xC0DE0002;
+constexpr uint32_t RECORD_BYTES = nav::Baseline::RECORD_BYTES;
+constexpr uint32_t MAX_RECORDS = (SLOT_PAGES * PAGE_BYTES - TRACE_BYTES) / RECORD_BYTES;  // 352: 11.7 s
+constexpr uint32_t SLOT_MAGIC = 0xC0DE0004;
+constexpr uint32_t REF_MAGIC = 0xC0DE0005;  // slot 0 only: a clean run that can serve as the reference
 struct SlotHeader {
     uint32_t magic, runNumber;
 };
@@ -58,7 +60,11 @@ extern "C" uint32_t _sidata, _sdata, _edata;  // linker: end of the program imag
 
 uint32_t runNumberIn(uint32_t slot) {
     const SlotHeader* h = reinterpret_cast<const SlotHeader*>(SLOT_ADDR[slot]);
-    return h->magic == SLOT_MAGIC ? h->runNumber : 0;
+    return h->magic == SLOT_MAGIC || h->magic == REF_MAGIC ? h->runNumber : 0;
+}
+
+bool programBelowSlots() {
+    return reinterpret_cast<uint32_t>(&_sidata) + static_cast<uint32_t>((&_edata - &_sdata) * 4) <= SLOT_ADDR[0];
 }
 
 // Halfwords, little endian. The area must be erased.
@@ -72,6 +78,7 @@ void flashWrite(uint32_t addr, const uint8_t* data, uint32_t bytes) {
 }
 
 // Compact number formats of a log record.
+constexpr float SPEED_UNIT_MM_S = 8.0f;  // int8: up to 1016 mm/s
 int8_t toInt8(float v, float unit) {
     const float q = v / unit;
     return static_cast<int8_t>(q > 127.0f ? 127 : q < -128.0f ? -128 : static_cast<int>(q < 0 ? q - 0.5f : q + 0.5f));
@@ -121,16 +128,34 @@ bool boot() {
     return true;
 }
 
+nav::Baseline reference() {
+    nav::Baseline b;
+    if (!programBelowSlots() || *reinterpret_cast<const uint32_t*>(SLOT_ADDR[0]) != REF_MAGIC) return b;
+    b.records = reinterpret_cast<const uint8_t*>(SLOT_ADDR[0] + TRACE_BYTES);
+    while (b.count < static_cast<int>(MAX_RECORDS) &&
+           *reinterpret_cast<const uint16_t*>(b.records + b.count * RECORD_BYTES) != 0xFFFF)  // erased: the log ends
+        ++b.count;
+    return b;
+}
+
+void clearReference() {
+    if (!reference().records) return;
+    FLASH_EraseInitTypeDef erase = {FLASH_TYPEERASE_PAGES, FLASH_BANK_1, SLOT_ADDR[0], 1};  // the page with the header
+    uint32_t pageError = 0;
+    HAL_FLASH_Unlock();
+    HAL_FLASHEx_Erase(&erase, &pageError);
+    HAL_FLASH_Lock();
+}
+
 void prepare() {
     const uint32_t a = runNumberIn(0), b = runNumberIn(1);
-    gSlot = a <= b ? 0 : 1;  // the older one
+    gSlot = reference().records ? 1 : 0;
     gRunNumber = (a > b ? a : b) + 1;
     gRecords = 0;
     gPagesErased = 0;
     gSlotReady = false;
     gSaved = false;
-    const uint32_t programEnd = reinterpret_cast<uint32_t>(&_sidata) + static_cast<uint32_t>((&_edata - &_sdata) * 4);
-    gSlotsUsable = programEnd <= SLOT_ADDR[0];
+    gSlotsUsable = programBelowSlots();
 }
 
 void eraseStep() {
@@ -175,10 +200,10 @@ void logStep(uint32_t msSinceStart, const math::Pose& pose, float alpha, const f
         static_cast<uint8_t>(y), static_cast<uint8_t>(y >> 8),
         static_cast<uint8_t>(th), static_cast<uint8_t>(th >> 8),
         static_cast<uint8_t>(toInt8(alpha, 0.01f)),                // steering angle, 10 mrad
-        static_cast<uint8_t>(toInt8(targetMmS[0], 5.0f)),          // wheel targets, 5 mm/s
-        static_cast<uint8_t>(toInt8(targetMmS[1], 5.0f)),
-        static_cast<uint8_t>(toInt8(measuredL, 5.0f)),             // measured wheel speeds, 5 mm/s
-        static_cast<uint8_t>(toInt8(measuredR, 5.0f)),
+        static_cast<uint8_t>(toInt8(targetMmS[0], SPEED_UNIT_MM_S)),          // wheel targets, 8 mm/s
+        static_cast<uint8_t>(toInt8(targetMmS[1], SPEED_UNIT_MM_S)),
+        static_cast<uint8_t>(toInt8(measuredL, SPEED_UNIT_MM_S)),             // measured wheel speeds, 8 mm/s
+        static_cast<uint8_t>(toInt8(measuredR, SPEED_UNIT_MM_S)),
         rangeTo5mm(tofMm[0]), rangeTo5mm(tofMm[1]), rangeTo5mm(tofMm[2]),  // ToF right-45, front, left-45, 5 mm
     };
     flashWrite(SLOT_ADDR[gSlot] + TRACE_BYTES + gRecords * RECORD_BYTES, record, RECORD_BYTES);
@@ -219,14 +244,16 @@ void traceStep(const reliability::Supervisor& supervisor, const nav::Navigator& 
     gTrace.samples = n + 1;
 }
 
-bool saveIfEnded(const reliability::Supervisor& supervisor) {
+bool saveIfEnded(const reliability::Supervisor& supervisor, bool reachedFinish) {
     using reliability::State;
     const bool ended = supervisor.state() == State::Done || supervisor.state() == State::Fault;
     if (gSaved || !supervisor.started() || !ended) return false;
     gSaved = true;  // once per run: a Recovering stop is not the end, the run resumes
     if (!gSlotsUsable || !gSlotReady) return true;
     uint8_t buffer[sizeof(SlotHeader) + sizeof(Trace)];
-    const SlotHeader header = {SLOT_MAGIC, gRunNumber};
+    // The reference must be a whole run that went as planned: to the finish, no fault, nothing cut off the log.
+    const bool isReference = gSlot == 0 && reachedFinish && gTrace.lastFault == 0 && gRecords < MAX_RECORDS;
+    const SlotHeader header = {isReference ? REF_MAGIC : SLOT_MAGIC, gRunNumber};
     memcpy(buffer, &header, sizeof(header));
     memcpy(buffer + sizeof(header), const_cast<const Trace*>(&gTrace), sizeof(Trace));
     flashWrite(SLOT_ADDR[gSlot], buffer, sizeof(buffer));

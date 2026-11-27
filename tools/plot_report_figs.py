@@ -1,4 +1,4 @@
-"""Figures for docs/report/report.typ, drawn from the two newest logged runs in data/ (flash_run_9.csv, flash_run_10.csv).
+"""Figures for docs/report/report.typ, drawn from the two newest logged runs in data/report/ (flash_run_9.csv, flash_run_10.csv).
 
     .venv/bin/python tools/plot_report_figs.py
 """
@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DATA = os.path.join(HERE, "..", "data")
+DATA = os.path.join(HERE, "..", "data", "report")
 OUT = os.path.join(HERE, "..", "docs", "report", "fig")
 
 

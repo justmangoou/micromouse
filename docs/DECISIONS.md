@@ -1,7 +1,7 @@
 # Why the numbers are what they are
 
 The code says *what* each setting does. This file records *why* it has its value: the measurement or test behind it,
-and what was tried and rejected. Newest topics first within each section.
+and what was tried and rejected. Older entries in a section explain how the current values were reached.
 
 Tools mentioned: `src/test_*.cpp` (bench firmware, one `env:test_*` each in `platformio.ini`), `tools/read_run.py`
 (read a run from the robot), `tools/replay_run.cpp` (replay a logged run on the host), `pio test -e native` (host tests).
@@ -31,9 +31,15 @@ target change it held the output negative for about a second: that was the stall
   300/150/350 mm/s step sequence. On the car the error went from 145 to ~50–65 mm/s RMS.
 - Speed measured over 4 ticks (one count per 5 ms tick is 77 mm/s; over 4 ticks 19 mm/s).
 
-`V_FULL_MM_S` (622) stayed as the Navigator's speed *scale*; only the controller uses the motor model.
+`V_FULL_MM_S` is the Navigator's speed *scale* only; the controller uses the motor model.
 
 ## Speed of the run (`include/course_params.h`, `lib/course_nav/src/planner.cpp`)
+
+**Current:** `V_FULL_MM_S` 680, `speed` 1.0, lookahead 85 mm + 0.18 x speed. Three floor runs without the block took
+5.86-5.90 s (from 8.6 s), no hits. Chosen in a host simulation with the measured motor model. About 0.9 s of the gain
+was a bug: the start plan made the first sensor snapshot look stale, so every run opened with fault recovery.
+
+Earlier history, at `V_FULL_MM_S` 622:
 
 - **Cruise speed 0.88** (~550 mm/s). The host closed-loop tests overlap a block at 0.90 and above, so going faster
   needs better tracking (pose correction), not a bigger number.
@@ -44,7 +50,7 @@ target change it held the output negative for about a second: that was the stall
   overlap a block.
 - **Tight gaps.** Full speed from 130 mm clearance down to 0.4 at 95 mm. Before, the car entered the 200 mm gap
   between T16 and T17 (the detour route) at ~480 mm/s and touched T17; now ~250 mm/s. Costs ~0.6 s on the normal route.
-- **Lookahead gain 0.22.** 0.15 weaved on the long straight; 0.30 cut the corner at T9.
+- **Lookahead gain** was 0.22: 0.15 weaved on the long straight; 0.30 cut the corner at T9.
 - Run times on the car: 11.7 s (start) → 10.7 → 8.9 → 8.5 s.
 
 ## Route (`lib/course_nav/src/planner.cpp`)
@@ -89,19 +95,40 @@ The course has one block that is not on the map, in the right wing, placed in th
    corridor beside the pit and the gap under T14 blind, exactly where a block blocks our route. Most false blocks
    there turned out to be the misplaced T14.
 4. **Only blocks on our route** matter: the hit must be within 150 mm of the route in the next 700 mm.
-5. **Baseline from clean runs** (`tools/make_baseline.py` → `include/baseline.h`). The car drives the same route every
-   run, so for each pose cell the baseline keeps the shortest reading any clean run saw. Static things the map lacks
-   cancel out. A reading 100 mm shorter than that, for 3 steps (0.1 s), is a block. Where the baseline covers the pose,
-   the wall / map-block margins of step 3 are not needed.
-   - Checked by leaving each clean run out of the baseline and replaying it: no false blocks.
-   - A block in the corridor mouth was found 0.1–1 s before contact (replayed and on the car).
+5. **Reference run.** Run 1 (no block) is logged to flash; a clean finish (no fault, log not cut off) makes it the
+   reference until KEY is held 2 s during a countdown. Run 2 compares each reading with what run 1 read near the same
+   pose, so static things the map lacks cancel out. (It replaced a `baseline.h` generated on the PC.)
 6. **Replan stall.** Planning blocks the control loop longer than the 150 ms motor command lease. The motors switched
    off, the supervisor raised CommandExpired and the car stopped for ~1.2 s. The lease is now extended to 600 ms
    just before a replan.
 
-**Limits.** A block that stays hidden behind T14 until the last moment is seen late; that is the sensor's view. The
-baseline must be rebuilt (a few clean runs) when the course or a sensor changes. The estimated block centre comes from
-the near face only and can be 10 cm off; the planner keeps 110 mm from it.
+With a single reference run, the first settings found phantom blocks in 25 of 36 replays of clean logs. What stopped
+that, and what floor tests with the block changed:
+
+- The block must stand on the planned route (`centreReach` 60 mm): the teacher tends to block run 1's path.
+- A sensor must stay short for 5 steps (`confirmSteps`).
+- A reading places the block anywhere in the sensor's cone, so the direction closest to the route is used. Projecting
+  along the sensor's axis put a block seen by a 45 deg sensor 10-20 cm off, and it was rejected.
+- Estimates from x 1160 are accepted and moved to x 1250 (`clampCentreX`): a real block's estimate reached 1190.
+- The front sensor throws random 30-80 mm readings on open floor. One in the reference hid a real block, so there the
+  reference's median is used (`Navigator::baselineAt`). Its mounting is worth checking.
+
+Replays of logged runs: no false block among the clean runs at the current speed (0 of 12 pairs), 8 of 30 among older,
+slower ones. In simulation a block 8-12 cm *beside* the path is still touched in 10-25 % of runs.
+
+## Dodging the block (`planner.h`, `include/course_params.h`)
+
+- **`DISC_R` 50** (the block's half-width). At 110 the gap below T14 looked closed and the car looped over the top.
+- **Slow approach** (`caution` 0.65 from x 950, until the block is passed): just after the bend by T14 it can only be
+  seen close up.
+- **Back off** (`backRange` 200 mm): a block found that close is reversed from before turning. 220-260 mm backed into
+  T14 in simulation. The floor hit that led to this was not reproduced in simulation.
+- **Finish lane** between T16 and T17 (200 mm): side readings under `laneClose` move the pose estimate sideways
+  (`Navigator::keepLane`). Shifting the planned lane instead hit T17 in simulation.
+- **Trust:** with at least 3 readings agreeing and the car 150 mm past the block, `trustedCaution` replaces `caution`
+  and detection stops.
+- **Tried and rejected:** going between T15 and T16 (80 mm required clearance instead of 90). On the floor it hit more.
+- The planner keeps 90 mm from a block's surface on a 40 mm grid, so a 200 mm gap has no cell wide enough.
 
 ## Pose correction: `Navigator::localize` (off)
 
@@ -109,17 +136,25 @@ It corrects the pose against the mapped blocks seen by the ToF. On the car it on
 because some blocks stood a few cm off the map (T14 by 5 cm). It stays off until the map is checked. It is tested on the
 host (`test_localisation_against_drift_and_a_shifted_map`). Turning it on is the most promising way to drive faster.
 
-## Gyro start-up (`include/config.h` section 4)
+## Gyro (`include/config.h` section 4, `lib/mpu6050`)
 
-2 s settle after power-on (hands off), then a 2 s average. A calibration is rejected if the samples spread more than
+- **Range ±1000 deg/s.** At ±500 the turn on the spot (~640 deg/s) clipped, and 5-10 deg of heading were lost toward the
+  side of the turn: the car then hit T16 after right turns and T17 after left ones.
+- **Scale** is 1: five turns by hand-off test (`env:test_gyro_scale`) counted 1800.3 for 1800.
+- **Offset** is measured again in every start countdown.
+
+At power-on: 2 s settle (hands off), then a 2 s average. A calibration is rejected if the samples spread more than
 0.01 rad/s (the car moved) or the offset exceeds 0.1 rad/s, and retried while the car stands still.
 
 ## Run log (`src/run_record.cpp`)
 
-Two 5 KB flash slots, the older one overwritten, so the last two runs survive power-off. The 16-byte records (30 Hz,
-9.5 s) store speeds and ranges in 5 mm(/s) units, small enough for two slots below the program.
+Two 6 KB flash slots: run 1 (the reference) and the latest run 2. The 16-byte records (30 Hz, 11.7 s per slot) store
+ranges in 5 mm units and speeds in 8 mm/s units (up to 1016 mm/s). The program must stay under 52 KB
+(`flash_guard.ld` fails the link otherwise); linking newlib's float `sqrtf` / `fmodf` without their double-precision
+error wrappers made room. About 600 bytes are left.
 
 ## Removed
 
 - The HC-05 Bluetooth link (`lib/comms`, `remote.cpp`, `tools/console.py`) and the host-driven manual mode.
-- A "background mask" of known false-block places, replaced by the baseline.
+- A "background mask" of known false-block places, replaced by the reference run.
+- The compiled `include/baseline.h` and `tools/make_baseline.py`, replaced by the reference run.

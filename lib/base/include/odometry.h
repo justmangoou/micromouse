@@ -1,6 +1,6 @@
 /**
  * @file    odometry.h
- * @brief   Encoder + gyro complementary filter. Port of FusedOdometry in sim/robot.py. Holds no robot or tuning
+ * @brief   Encoder + gyro complementary filter. Holds no robot or tuning
  *          numbers: the caller supplies all of them (firmware: cfg::ODOM and cfg::GYRO_BIAS in config.h).
  */
 #pragma once
