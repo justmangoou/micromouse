@@ -32,13 +32,12 @@
 #define MOTOR_B_IN2_PORT GPIOB
 #define MOTOR_B_IN2_PIN  GPIO_PIN_11
 
-// VL53L0X shutdown (XSHUT) lines, in sensor order: right 45 deg, front, left 45 deg. Five sensor sockets are wired; the two
-// unused lines are held low (gpioInit) so those sensors stay in reset.
+// VL53L0X shutdown (XSHUT) lines, in sensor order: right 45 deg, front, left 45 deg, right 90 deg (socket "senR", PA11).
+// Five sensor sockets are wired; the one unused line is held low (boardInit) so that sensor stays in reset.
 #define TOF_XSHUT_PORTS \
-    { GPIOA, GPIOA, GPIOB }
+    { GPIOA, GPIOA, GPIOB, GPIOA }
 #define TOF_XSHUT_PINS \
-    { GPIO_PIN_12, GPIO_PIN_15, GPIO_PIN_3 }
-#define TOF_UNUSED_XSHUT_A_PINS (GPIO_PIN_11)  // socket "senR"
+    { GPIO_PIN_12, GPIO_PIN_15, GPIO_PIN_3, GPIO_PIN_11 }
 #define TOF_UNUSED_XSHUT_B_PINS (GPIO_PIN_4)   // socket "senL"
 
 // Buttons (active low, pull-ups) and the status LED (active low).
@@ -56,21 +55,27 @@ constexpr uint32_t UART1_BAUD_RATE = 115200;  // printf to a wired USB-serial ad
 // =====================================================================================================================
 // 2. ToF sensors (VL53L0X)
 // =====================================================================================================================
+// TOF_COUNT = the sensors of the navigation layout (TOF_LAYOUT): right 45, front, left 45. TOF_SENSORS = all sensors on
+// the robot: the 4th, TOF_RIGHT_90, looks sideways to the right. It is not safety-critical: the navigation layout, the
+// health checks and the fault logic only see the first TOF_COUNT; a missing or unreliable 4th reads TOF_MAX_MM.
 constexpr int TOF_COUNT = 3;
-constexpr int TOF_RIGHT_45 = 0, TOF_FRONT = 1, TOF_LEFT_45 = 2;
-constexpr float TOF_ANGLE_DEG[TOF_COUNT] = {-45.0f, 0.0f, 45.0f};   // counter-clockwise from straight ahead
-constexpr float TOF_MOUNT_MM[TOF_COUNT][2] = {{60.0f, -30.0f}, {65.0f, 0.0f}, {60.0f, 30.0f}};  // x forward, y left
+constexpr int TOF_SENSORS = 4;
+constexpr int TOF_RIGHT_45 = 0, TOF_FRONT = 1, TOF_LEFT_45 = 2, TOF_RIGHT_90 = 3;
+constexpr float TOF_ANGLE_DEG[TOF_SENSORS] = {-45.0f, 0.0f, 45.0f, -90.0f};   // counter-clockwise from straight ahead
+// x forward, y left, from the wheel axle midpoint. TOF_RIGHT_90, from the PCB: socket senR's pins centred 39 mm ahead of the
+// axle (the motor clamp holes) and 33 mm right, plus ~2 mm for the module standing in it. Check with a ruler.
+constexpr float TOF_MOUNT_MM[TOF_SENSORS][2] = {{60.0f, -30.0f}, {65.0f, 0.0f}, {60.0f, 30.0f}, {39.0f, -35.0f}};
 // Each sensor's field of view is modelled as five rays.
 constexpr int TOF_FOV_RAYS = 5;
 constexpr float TOF_FOV_DEG[TOF_FOV_RAYS] = {-12.0f, -6.0f, 0.0f, 6.0f, 12.0f};
 // Range offset per sensor, micrometres, measured with env:test_tof_cal (flat card at 100 mm). TOF_OFFSET_UNSET keeps the
 // sensor's factory value. An offset belongs to one physical sensor: recalibrate when a sensor is replaced.
 constexpr int32_t TOF_OFFSET_UNSET = INT32_MIN;
-constexpr int32_t TOF_OFFSET_UM[TOF_COUNT] = {31000, 38000, 34000};
+constexpr int32_t TOF_OFFSET_UM[TOF_SENSORS] = {31000, 38000, 34000, TOF_OFFSET_UNSET};  // right 90: not calibrated yet
 constexpr float TOF_MIN_MM = 30.0f;    // readings are clamped to this range; TOF_MAX_MM also means "nothing in range"
 constexpr float TOF_MAX_MM = 1200.0f;
 
-static_assert(TOF_COUNT > 0 && TOF_COUNT <= tof::MAX_SENSORS, "ToF sensor count exceeds layout capacity");
+static_assert(TOF_COUNT > 0 && TOF_COUNT <= tof::MAX_SENSORS && TOF_SENSORS > TOF_COUNT && TOF_RIGHT_90 == TOF_COUNT, "ToF sensor count exceeds layout capacity");
 static_assert(TOF_FOV_RAYS > 0 && TOF_FOV_RAYS <= tof::MAX_FOV_RAYS, "ToF ray count exceeds layout capacity");
 
 constexpr tof::Layout makeTofLayout() {

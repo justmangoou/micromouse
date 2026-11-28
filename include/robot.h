@@ -12,14 +12,14 @@
 
 struct StartupStatus {
     bool imuOk = false;
-    int tofUp = 0;            // sensors that came up, out of TOF_COUNT
+    int tofUp = 0;            // navigation sensors that came up, out of TOF_COUNT
     bool calibrated = false;  // gyro bias measured while standing still
 };
 
 // One control step (cfg::CONTROL_PERIOD_MS).
 struct SensorStep : reliability::SensorSnapshot<cfg::TOF_COUNT> {
     int32_t countsL = 0, countsR = 0;  // signed counts since the previous encoder sample
-    float tof[TOF_COUNT] = {};        // clamped ranges for navigation, in mm
+    float tof[TOF_SENSORS] = {};      // clamped ranges in mm: [0..TOF_COUNT) the navigation sensors, then the extras (cfg::TOF_RIGHT_90)
 };
 
 // Waits for the next control step, reading the gyro every cfg::GYRO_PERIOD_MS meanwhile.

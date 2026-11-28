@@ -51,6 +51,11 @@ struct NavParams {
     float lookahead = 100.0f;      // pure-pursuit lookahead at standstill, mm
     float lookaheadGain = 0.15f;   // extra lookahead per mm/s of speed (longer at speed = less weaving)
     bool softProfile = false;      // use sqrt of the route's speed factor (slows less in gaps and bends)
+    // Left of leftBoostX, where no random block can be, the whole speed (straights, bends, gaps) is multiplied by this.
+    float leftBoost = 1.0f;
+    // Once the random block is found, right of RIGHT_WING_X_MM: the speed is multiplied by this (nothing unknown is left).
+    float foundBoost = 1.0f;
+    float leftBoostX = 850.0f;     // mm; ends early enough to slow down before the bend by T14
     float caution = 0.6f;          // speed factor right of cautionX, while the block may be ahead
     float alertSpeed = 0.5f;       // speed factor for 0.8 s after a new block is found
     float finishY = -1.0e9f;       // below this y the car never drives slower than finishSpeed
@@ -65,6 +70,8 @@ struct NavParams {
     float laneClose = 0.0f;        // mm
     float laneStep = 3.0f;         // mm per control step
     float laneLimit = 80.0f;       // total correction per run, mm
+    // The sensor looking straight right (keepLane's right90): where it sits on the car, mm (x forward, y left).
+    math::Vec2 right90Mount = {39.0f, -35.0f};
     float cautionX = 1050.0f;      // `caution` applies right of this, mm
     // A new block closer than this (car centre to block centre) is too near to turn around beside it: brake and back
     // off for backSteps control steps before planning. 0 = off.
@@ -113,7 +120,9 @@ public:
     bool replanDue(float t) const { return needReplan_ && t - lastPlanT_ > REPLAN_SPACING_S; }
 
     // Side-sensor correction in the finish lane (NavParams::laneClose). Call before step(); true when `pose` was moved.
-    bool keepLane(math::Pose& pose, const float tof[]);
+    // right90: the extra sensor looking straight right (mm; TOF_MAX when missing or nothing in range), used in the T15-T16
+    // gap.
+    bool keepLane(math::Pose& pose, const float tof[], float right90 = 1200.0f);
 
     // For the run log, tools and tests:
     float progress() const { return path_.n > 0 ? path_.s[idx_] / path_.s[path_.n - 1] : 0.0f; }
@@ -122,6 +131,7 @@ public:
     const Path& path() const { return path_; }
     const Planner& planner() const { return planner_; }
     int replans() const { return replans_; }
+    bool inGap() const { return gate_ != Gate::Off; }  // driving the T15-T16 gap route
     int unmappedBlocks() const { return planner_.numExtras(); }
     int blockSupport() const { return support_; }  // short readings that agreed with the first found block
     bool blockPassed() const { return passed_; }   // trusted and behind the car: driving with trustedCaution
@@ -138,12 +148,19 @@ private:
     bool isNewBlockHit(math::Vec2 hit, bool baselineCovered) const;
     float distanceToRoute(math::Vec2 p) const;  // to the route ahead, DetectParams::pathAhead along it
     bool nearRouteAhead(math::Vec2 p, float reach) const { return distanceToRoute(p) <= reach; }
-    void addOrMergeBlock(math::Vec2 centre, float t);
+    void addOrMergeBlock(math::Vec2 centre, float t, bool across = false, float x = 0.0f);
     void updateTrust(const math::Pose& pose);
 
     // Route following
     void track(const math::Pose& pose, float speed, float t, float duty[2]);
     float targetSpeed(const math::Pose& pose, float alpha, float t) const;
+
+    // The T15-T16 gap (Planner::gate): down to it, turn on the spot, look, drive through.
+    enum class Gate : uint8_t { Off, Approach, Turn, Look, Through };
+    void gateTurn(const math::Pose& pose, float duty[2]);
+    bool gateLook(math::Pose& pose, const float tof[]);
+    float nearRange(const math::Pose& pose, int sensor) const;
+    bool sideFix(math::Pose& pose, float right90);
 
     // Pose correction
     float localizeCost(const math::Pose& pose, const float tof[], const bool use[]) const;
@@ -165,6 +182,16 @@ private:
     int backing_ = 0;  // control steps of reversing still to do
     bool passed_ = false;
     bool align_ = false;  // turn on the spot until facing the route, then drive
+    Gate gate_ = Gate::Off;
+    uint8_t gateSteps_ = 0, gateSeen_ = 0;
+    int gateCorner_ = 0;  // last route point before the turn on the spot
+    float gateDiff_ = 0.0f;
+    float sideShifted_ = 0.0f;
+    float lastRight90_ = 1200.0f;
+    bool gateEdge_ = false;  // T16's far edge has been seen from the gap
+    bool onFace_ = false;
+    uint8_t acrossStreak_ = 0;
+    bool acrossOnly_ = false;   // the block was put in the corridor by the across-the-pit look, not seen up close yet  // steps the right 45-degree sensor has seen something down the first corridor    // the straight-right reading matched a mapped block's face in the last step
     float lastPlanT_ = 0.0f;
     float alertUntil_ = -1.0f;
     bool needReplan_ = false;

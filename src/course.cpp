@@ -7,7 +7,7 @@
  *   power on -> sensors up, gyro calibrated (main.cpp) -> LED ready:
  *       slow even blink: run 1, no random block on the course. A clean finish records the reference.
  *       double blink:    run 2, a reference exists; the random block is looked for and avoided.
- *   Run 1 is learned anew after every power-on or reset (or hold KEY for 2 s during the countdown).
+ *   The reference is kept through power-off; hold KEY for 2 s during the countdown to learn run 1 again.
  *   press KEY -> 3 s countdown (LED blinks fast; the run record's flash slot is erased meanwhile). 1 s after KEY is let
  *       go the gyro offset is measured again (LED solid, ~1.5 s, hands off)
  *   run: 30 Hz control step (odometry -> Navigator -> wheel targets), the 200 Hz speed loop drives the wheels
@@ -202,7 +202,7 @@ void driveStep(Course& c, SensorStep& s, State before, float targetMmS[2]) {
     // A replan runs the planner inside this step and blocks the loop: keep the motors' command alive meanwhile.
     if (gNav.replanDue(t)) motorExtendLease(REPLAN_LEASE_MS);
     // gNav.localize(c.odometry.pose, s.tof, t);  // pose correction: off, see docs/DECISIONS.md
-    gNav.keepLane(c.odometry.pose, s.tof);
+    gNav.keepLane(c.odometry.pose, s.tof, s.tof[cfg::TOF_RIGHT_90]);
     gNav.step(c.odometry.pose, c.odometry.v, s.tof, t, duty);
     if (gNav.replans() != replansBefore) {
         // The sensor snapshot is now older than usual. That is expected after a plan, not a fault.
@@ -237,7 +237,7 @@ void recordStep(Course& c, const SensorStep& s, const float targetMmS[2]) {
     Supervisor& sup = c.supervisor;
     runrec::markRunning(sup.state() == State::Running);
     if (sup.state() == State::Running && sup.started())
-        runrec::logStep(s.completedAt - sup.startedAt(), c.odometry.pose, gNav.lastAlpha(), targetMmS, s.tof);
+        runrec::logStep(s.completedAt - sup.startedAt(), c.odometry.pose, targetMmS, s.tof);
     ledStatusSet(statusLed(c, s.completedAt));
     reportRuntime(sup, s);
     runrec::traceStep(sup, gNav, c.odometry.pose, s.completedAt);

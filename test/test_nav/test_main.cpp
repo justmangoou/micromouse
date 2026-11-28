@@ -487,6 +487,31 @@ bool bodyOverlaps(const Pose& p, const World& w) {
 
 }  // namespace
 
+// A block low in the first corridor: the route goes through the T15-T16 gap, straight along its centre line, and keeps
+// clear of every block. A block higher up keeps the planned detour.
+void test_a_low_block_is_passed_through_the_t15_t16_gap() {
+    gPlanner.setMap(MAP_BLOCKS, MAP_BLOCK_COUNT);
+    gPlanner.addExtra({1285.0f, 60.0f});
+    TEST_ASSERT_TRUE(gPlanner.plan({1285.0f, 430.0f}, gPath));
+    TEST_ASSERT_TRUE(gPlanner.gated());
+    bool through = false;
+    for (int i = 0; i < gPath.n; i++) {
+        const math::Vec2 p = gPath.p[i];
+        if (p.x > 1400.0f && p.x < 1500.0f && p.y > 150.0f && p.y < 450.0f) {
+            TEST_ASSERT_FLOAT_WITHIN(2.0f, nav::GATE_Y, p.y);
+            through = true;
+        }
+        TEST_ASSERT_TRUE_MESSAGE(gPlanner.clearance(p) >= 75.0f, "gap route too close to a block");
+    }
+    TEST_ASSERT_TRUE(through);
+    TEST_ASSERT_TRUE(gPath.p[gPath.n - 1].y < -90.0f);
+
+    gPlanner.clearExtras();
+    gPlanner.addExtra({1285.0f, 300.0f});
+    TEST_ASSERT_TRUE(gPlanner.plan({1285.0f, 520.0f}, gPath));
+    TEST_ASSERT_FALSE(gPlanner.gated());
+}
+
 void test_closed_loop_with_unmapped_blocks() {
     static World world;
     world.n = 0;
@@ -614,6 +639,7 @@ int main() {
     RUN_TEST(test_baseline_flags_only_what_is_new_on_the_path);
     RUN_TEST(test_trust_after_the_block_is_passed);
     RUN_TEST(test_a_plan_is_announced_before_the_step_that_runs_it);
+    RUN_TEST(test_a_low_block_is_passed_through_the_t15_t16_gap);
     RUN_TEST(test_closed_loop_with_unmapped_blocks);
     RUN_TEST(test_localisation_against_drift_and_a_shifted_map);
     return UNITY_END();

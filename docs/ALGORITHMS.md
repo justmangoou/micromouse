@@ -81,6 +81,9 @@ v_turn  = clamp(1 / (1 + 1.75 · |heading change|),      0.35, 1)     heading ch
 factor  = min(v_clear, v_edge) · v_turn
 ```
 
+Right of x = 1200, `v_clear`'s floor is 0.7 (not 0.4) and the bend weight 1.3 (not 1.75); once the random block
+is found, 0.85 and 1.0, and the speed there is × 1.15.
+
 ## 3. Path following (`Navigator::track`)
 
 Pure pursuit:
@@ -110,7 +113,8 @@ Then, in order:
 | Condition | Effect |
 |---|---|
 | x ≤ 1050 | `factor` is at least 0.5 |
-| Run 2, x > 950, block not yet passed | × 0.65 |
+| x ≤ 850 | × 1.30 |
+| Run 2, x > 950, block not yet found | × 0.85 |
 | A block was found less than 0.8 s ago | × 0.5 |
 | Always | at least 150 mm/s |
 | y < 250 (final stretch) | at least 306 mm/s |
@@ -182,7 +186,7 @@ range the position is too uncertain.
 | Surface hit point has x ≥ 1150 | anything outside the right-hand section |
 | Hit point within 150 mm of the path in the next 700 mm | things off to the side |
 | *(map mode only)* hit point 150 mm from every wall and mapped block | known things seen slightly out of place |
-| Centre has 1160 ≤ x ≤ 1800 and y ≥ 0 | impossible places |
+| Centre has 1160 ≤ x ≤ 1800 and y ≥ -60 | impossible places (a block on the finish line is centred near 0) |
 | (x is then raised to at least 1250) | a block cannot stand further left |
 | Centre within 60 mm of the path | blocks that would not actually be hit |
 
@@ -210,11 +214,36 @@ Run 1 read 600 mm ahead at this spot. Now the front sensor reads 350 mm.
 
 - **Back off:** if the new block is within 200 mm, reverse for 10 steps (fewer if a mapped block is behind), then turn on the spot until facing the new
   route before driving.
-- **Trust:** once at least 3 short readings agree on the block and the robot is 150 mm past it, detection switches off
-  and the caution speed limit is lifted.
+- **Trust:** once at least 3 short readings agree on the block and the robot is 150 mm past it, detection switches off.
+  (The caution speed limit is already lifted as soon as the block is found.)
 - **Finish lane:** after a block was found, in the narrow lane at the end (x ≥ 1450, y ≤ 600, driving down), a side
   reading under 90 mm shifts the position estimate 4 mm per step towards that side, so the steering moves away.
   At most 60 mm in total.
+
+### Seeing down the first corridor early
+
+Before the bend by T14 (x 990-1120, y > 700), the right 45° sensor looks across the pit down the first corridor. If it
+reads 380-820 mm, at least 250 mm shorter than run 1 did there, for 2 steps in a row, and the centre of its cone ends at
+x 1100-1400 and y < 470, a block is put in the corridor's middle (x 1290) at that height (at least 100). The route
+then goes round over T15 straight away, without driving down the corridor, stopping or backing off. Only while the
+front sensor reads more than 300 mm (a block at the bend itself is the front sensor's), and the guess is replaced if a
+block is then found up close before x 1250.
+
+### Through the T15-T16 gap
+
+If the block is low in the first corridor (centre y ≤ 150) and is found while the robot is still above the gap
+(y ≥ 350), the route goes through the 200 mm gap between T15 and T16 instead of back up and round T15
+(`Planner::gate`, `Navigator` `GATE_*`):
+
+1. Drive straight down to y = 300 (the gap's centre line), braking to a stop.
+2. Turn on the spot to face +x.
+3. Stand still for 6 steps. The left 45° sensor sees T15, the right one T16. The y offset whose predicted difference of
+   the two readings matches the measured one is applied to the position. A range error common to both cancels out.
+4. Drive through at most 320 mm/s with a 70 mm lookahead, round T16's corner (radius 100 about it) into the lane.
+   In the gap the 90° right sensor corrects y against T16's top face, and when its reading jumps past 300 mm it has
+   just passed T16's far edge, which fixes x.
+
+Once committed, the robot does not replan.
 
 ### When detection can fail
 

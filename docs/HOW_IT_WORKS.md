@@ -16,7 +16,7 @@ known in advance. One extra block can be placed in its way, and the robot has to
 | Blue Pill (STM32F103C8) | The brain. Small: 64 KB of flash, 20 KB of RAM, no hardware for decimal maths. |
 | 2 DC motors with encoders | Drive the wheels and count how far each one turned. |
 | MPU6050 gyro | Measures how fast the robot is turning. |
-| 3 VL53L0X distance sensors | Measure the distance to things: one looks ahead, two look 45° left and right. |
+| 4 VL53L0X distance sensors | Measure the distance to things: one looks ahead, two look 45° left and right, one looks 90° to the right (an optional extra: it never causes a fault, and reads "nothing in range" if it is missing). |
 | KEY button and LED | The only controls. |
 
 ## Using it
@@ -50,9 +50,9 @@ Step by step:
 3. The robot drives and stops after the finish line.
 4. Carry it back to the start and press KEY for the next run.
 
-**Run 1 is forgotten at power-off or reset.** The first run after switching on always learns the course, so the extra
-block must not be there yet. Every run after that looks for it. To learn again without switching off, hold KEY for
-2 seconds during a countdown.
+**Run 1 is remembered, even after power-off.** Every run after it looks for the extra block. To learn again (the
+course, the robot or a sensor changed), hold KEY for 2 seconds during a countdown, then drive run 1 without the extra
+block.
 
 ### What the LED means
 
@@ -102,8 +102,12 @@ makes the motors deliver it: it estimates the power needed, then corrects using 
 
 ### Extra tricks around the block
 
-- It slows down in the right-hand section until it has passed the block.
+- It drives a little slower in the right-hand section until it has found the block.
 - If the block only appears when very close, it backs off a little before turning.
+- If a block is in the first corridor, it is often seen across the pit before the bend by T14; the robot then goes
+  round over T15 without entering the corridor.
+- If the block is low, near the finish, it stops above the T15-T16 gap, turns to face it, measures where it is with the
+  side sensors, and drives through instead of going back round T15.
 - In the narrow lane before the finish, the side sensors nudge its position estimate so it steers away from the blocks on either side (T16 and T17).
 
 ### Safety

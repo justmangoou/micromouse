@@ -39,6 +39,10 @@ target change it held the output negative for about a second: that was the stall
 5.86-5.90 s (from 8.6 s), no hits. Chosen in a host simulation with the measured motor model. About 0.9 s of the gain
 was a bug: the start plan made the first sensor snapshot look stale, so every run opened with fault recovery.
 
+**Left side x 1.30** (x <= 850, `leftBoost`; to 950 raised simulated failures from 1.5 to 2.0 %), on floor trial. Every speed there is raised evenly, same route. 1.15 on
+the floor: left side 3.12 -> 2.73 s. The simulation shows no touch even at 1.30, but it also missed the touches of the 0.7 floor, so only floor runs
+count. Fallback: 1.15.
+
 **Left side floor stays 0.5.** 0.7 saved ~0.35 s (simulation: no touch; floor run 1: 5.83 to 5.50 s) but the car
 touched blocks much more often on the floor, so it was put back.
 
@@ -106,8 +110,8 @@ The course has one block that is not on the map, in the right wing, placed in th
    there turned out to be the misplaced T14.
 4. **Only blocks on our route** matter: the hit must be within 150 mm of the route in the next 700 mm.
 5. **Reference run.** Run 1 (no block) is logged to flash; a clean finish (no fault, log not cut off) makes it the
-   reference until power-off, a reset, or KEY held 2 s during a countdown: each session learns anew (it was kept across
-   power cycles at first). Run 2 compares each reading with what run 1 read near the same
+   reference until KEY is held 2 s during a countdown. It is kept through power-off (for a while each session learned
+   anew; changed back so a restart does not cost a learning run). Run 2 compares each reading with what run 1 read near the same
    pose, so static things the map lacks cancel out. (It replaced a `baseline.h` generated on the PC.)
 6. **Replan stall.** Planning blocks the control loop longer than the 150 ms motor command lease. The motors switched
    off, the supervisor raised CommandExpired and the car stopped for ~1.2 s. The lease is now extended to 600 ms
@@ -154,8 +158,40 @@ slower ones. In simulation a block 8-12 cm *beside* the path is still touched in
 - **A close side reading places the block.** A block just beside run 1's path was seen late; the guess pulled it toward
   the route, 10 cm low, and the car drove into it. With a side sensor under 80 mm the block is placed from that reading:
   on 22 logged runs only that one (corrected) and one other (by 1 cm) move; no change in 4000 simulated drives.
-- **Slow approach** (`caution` 0.65 from x 950, until the block is passed): just after the bend by T14 it can only be
-  seen close up.
+- **Right wing driven faster** (x > 1200: tight-gap floor 0.4 -> 0.7, bend weight 1.75 -> 1.3). Floor run with the
+  block found early: 6.34 s, of which ~0.8 s at 160 mm/s right after the find and slow bends into the lane. Simulated
+  median 7.18 -> 6.73 s, failures 1.95 -> 1.80 %, unchanged with 2.5 cm of drift. Not tried: dropping the 0.8 s
+  slow-down after a find, which doubled simulated touches even for blocks found 30 cm away.
+- **After the block is found** (right wing): gap floor 0.85, bend weight 1.0, speed x1.15 (`foundBoost`). Simulated
+  median 6.73 -> 6.38 s, failures 1.80 -> 1.88 %; with 2.5 cm of drift about the same, x-25 8.5 -> 9.8 %. In
+  simulation T15/T16/T17 are rarely touched (11 of 4000); most failures are elsewhere.
+- **After the find, from x 1000** (also the way back over T14), and wheel commands there may reach vFull x 1.15:
+  simulated median 5.58 -> 5.50 s, 90th percentile 6.81 -> 6.50 s, failures unchanged (1.80 -> 1.73 %).
+- **Front reference in the bend by T14** (x 1050-1200, y > 650): run 1's records within 20 mm only, not 45. There the
+  front reading of T15's corner changes by 100 mm over a few cm, and a nearby record hid a block at the bend until 45 mm
+  away (floor hit). Logs: that block found at x 1094 instead of 1193; false blocks on clean pairs unchanged (55 of 506);
+  from x 930 it also found other bend blocks 2-16 cm sooner but false blocks rose to 73.
+- **Seeing down the first corridor early** (see ALGORITHMS.md): on the floor logs 5 of 8 corridor blocks would have
+  been found at x 1010-1030 instead of in the corridor (range limit 620 -> 820 mm after floor runs read 610-795; at 750+ a block at the bend was also taken for a corridor
+  block, so the front sensor must read > 300 mm, and a block found up close before x 1250 replaces the guess); none on 506 clean pairs or 10 runs with the block elsewhere.
+  Simulated with the block put where it was seen: 90th-percentile time 7.3 -> 5.4 s, T15 touched 7 -> 1 of 2634. Put
+  at a fixed low height instead, blocks near the corridor's top were driven into, hence the seen height and y < 470.
+- **Front margin 60 mm driving straight down** (100 elsewhere): a low block in the first corridor found ~4 cm
+  sooner (floor log: y 459 -> 502); false blocks on clean pairs 44 -> 46 of 506. Earlier is not possible there: from
+  the corridor, run 1's front sensor already saw T16's corner about as far away as such a block.
+- **Finish-line block** (`minCentreY` 0 -> -60): a block on the line is estimated at y 0 ± a few cm, and every
+  estimate below 0 was thrown away. On the floor it was found at y 225 instead of 428. On the logs no other detection
+  changes and false blocks stay 35 of 380 pairs.
+- **T15-T16 gap** for a low block (see ALGORITHMS.md). Stop, turn, measure, go, because a flowing turn into the
+  gap needed the position right to 2 cm. Simulated, 822 of 4000 drives use it: touched 0.2 % vs 1.5 % for the detour,
+  7.9 s vs 8.2 s. With the robot 2-3.5 cm off: better in 7 of 9 cases; worse when it is truly *higher* than it thinks
+  (y+20: 3.2 vs 1.0 %, y+35: 7.3 vs 0.6 %). Not yet driven on the floor.
+- **90° right sensor** (added 2026-11-28, socket senR / PA11): used only in the gap. Using it in the finish lane gave
+  nothing in simulation and, with an uncalibrated +15 mm range error, more touches (1.0 vs 0.35 %).
+- **Slow approach** (`caution` 0.85 from x 950, until the block is found): just after the bend by T14 it can only be
+  seen close up. Was 0.65 until the block was *passed*: a block near the finish line is never passed, so the whole
+  detour was slow (10.4 s on the floor). In 4000 simulated drives the median goes 8.96 -> 7.74 s with the same failure
+  rate (1.52 % -> 1.50 %). Not yet confirmed on the floor.
 - **Back off** (`backRange` 200 mm): a block found that close is reversed from before turning. 220-260 mm backed into
   T14 in simulation. The floor hit that led to this was not reproduced in simulation.
 - **Finish lane** between T16 and T17 (200 mm): side readings under `laneClose` move the pose estimate sideways

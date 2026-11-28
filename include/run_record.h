@@ -4,13 +4,12 @@
  *
  * Two slots of 6 KB at the top of the 64 KB flash:
  *   - slot 0, run 1: the course without the random block. Once such a run reaches the finish with no fault, its log is
- *     the reference for block detection until power-off, a reset, or holding KEY. The log stays in flash, but after a
- *     restart it is not used: the first run learns again.
+ *     the reference for block detection, kept through power-off, reset and reflashing until KEY is held to forget it.
  *   - slot 1, run 2: every run made while a reference exists.
  * A slot holds
  *   - a summary and a trace (pose every 400 ms, state, faults, blocks found), written once when the run ends, and
- *   - a fast log, one 16-byte record per control step (30 Hz, up to 11.7 s; later steps are not logged): pose, steering
- *     angle, wheel targets and measured wheel speeds, the three ToF ranges.
+ *   - a fast log, one 16-byte record per control step (30 Hz, up to 11.7 s; later steps are not logged): pose, the
+ *     right-90 ToF range, wheel targets and measured wheel speeds, the three navigation ToF ranges.
  * The slot is erased during the 3 s start countdown, one page per control step, while the motors are off: a page erase
  * stalls the CPU for ~30 ms.
  *
@@ -30,7 +29,7 @@ namespace runrec {
 // Once at boot. True when the chip reset in the middle of the last run.
 bool boot();
 
-// The reference run (see above), for Navigator::setBaseline. Empty when none was recorded since power-on.
+// The reference run (see above), for Navigator::setBaseline. Empty when there is none.
 nav::Baseline reference();
 void clearReference();
 
@@ -43,7 +42,7 @@ void startRun();
 
 // Every control step.
 void markRunning(bool running);
-void logStep(uint32_t msSinceStart, const math::Pose& pose, float alpha, const float targetMmS[2], const float tofMm[]);
+void logStep(uint32_t msSinceStart, const math::Pose& pose, const float targetMmS[2], const float tofMm[]);  // tofMm: all cfg::TOF_SENSORS ranges
 void traceStep(const reliability::Supervisor& supervisor, const nav::Navigator& navigator, const math::Pose& pose,
                uint32_t now);
 

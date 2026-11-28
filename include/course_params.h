@@ -35,8 +35,10 @@ inline nav::NavParams navParams(bool findBlock) {
     p.softProfile = true;      // slow down less in gaps (sqrt of the route's speed factor)
     p.lookahead = 85.0f;
     p.lookaheadGain = 0.18f;   // longer lookahead at speed: prevents corner cutting
-    // Run 2, while the block may still be ahead: slow from before the bend by T14, where it can only be seen close up.
-    p.caution = findBlock ? 0.65f : 1.0f;
+    p.leftBoost = 1.30f;       // the left side 30 % faster everywhere (1.15 was test step 1)
+    p.foundBoost = 1.15f;      // right wing, once the block is found (wheel commands still capped at vFull)
+    // Run 2, until the block is found: slower from before the bend by T14, where it can only be seen close up.
+    p.caution = findBlock ? 0.85f : 1.0f;
     p.cautionX = findBlock ? 950.0f : 1050.0f;
     p.backRange = findBlock ? 200.0f : 0.0f;  // a block found this close: brake and back off, then turn
     p.finishY = 250.0f;        // past the last block: drive onto the finish line at no less than ...
@@ -45,6 +47,7 @@ inline nav::NavParams navParams(bool findBlock) {
     p.laneClose = 90.0f;       // finish lane: correct the drift off T16 / T17 with the side sensors ...
     p.laneStep = 4.0f;         // ... this far per control step ...
     p.laneLimit = 60.0f;       // ... and at most this much in all
+    p.right90Mount = {cfg::TOF_MOUNT_MM[cfg::TOF_RIGHT_90][0], cfg::TOF_MOUNT_MM[cfg::TOF_RIGHT_90][1]};  // gap route
 
     // Trust: with the block confirmed and behind us, the rest of the course is the known map.
     p.trustSupport = 3;        // agreeing readings
@@ -60,7 +63,7 @@ inline nav::NavParams navParams(bool findBlock) {
     d.maxCentreX = 1800.0f;    // inside the arena ...
     d.minCentreX = 1160.0f;    // ... not deep in the forbidden middle (estimates of a real block reach 1190) ...
     d.clampCentreX = 1250.0f;  // ... and a block cannot stand further left than this
-    d.minCentreY = 0.0f;       // ... and not past the finish line
+    d.minCentreY = -60.0f;     // ... and not far past the finish line (one on the line is centred near 0)
     d.pathReach = 150.0f;      // the hit is near the route in the next 700 mm ...
     d.centreReach = 60.0f;     // ... and the block would stand on it
     d.pathAhead = 700.0f;

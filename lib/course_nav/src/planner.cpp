@@ -28,6 +28,15 @@ constexpr int GOAL_Y1 = static_cast<int>((-120.0f - PAD_Y) / GRID_RES);
 constexpr float LANE_X = 1585.0f, LANE_HALF = 100.0f;
 constexpr float LANE_ENTRY_Y = 560.0f, LANE_TOP_Y = 440.0f;
 
+// Right wing (x > 1200): the gaps there are driven with the side-sensor lane correction and the straight lane, so they
+// are slowed less (simulated: 0.45 s faster, no more touches, also with 2.5 cm of drift).
+constexpr float RIGHT_WING_X = 1200.0f;
+constexpr float RIGHT_GAP_FLOOR = 0.7f;   // vClr's floor there (0.4 elsewhere)
+constexpr float RIGHT_BEND = 1.3f;        // vTurn's bend weight there (1.75 elsewhere)
+// Once the one random block is on the map nothing unknown is left: slow down less still (simulated -0.1 s, no more touches).
+constexpr float FOUND_GAP_FLOOR = 0.85f, FOUND_BEND = 1.0f;
+constexpr float FOUND_X = 1000.0f;  // ... from here: also the way back over T14
+
 inline bool isGoal(int ix, int iy) { return ix >= GOAL_X0 && ix <= GOAL_X1 && iy <= GOAL_Y1; }
 
 inline int heuristic(int ix, int iy) {
@@ -285,6 +294,8 @@ int Planner::astar(math::Vec2 start, float radius) {
 
 bool Planner::plan(math::Vec2 start, Path& out) {
     out.n = 0;
+    gated_ = false;
+    if (nExtras_ == 1 && gate(start, out)) return true;
     buildWork();
     static const float radii[3] = {R_ROBOT, R_ROBOT - 10.0f, 45.0f};  // squeeze through if the preferred margin is gone
     int n = 0;
@@ -294,7 +305,42 @@ bool Planner::plan(math::Vec2 start, Path& out) {
     return true;
 }
 
+// A block low in the first corridor: through the T15-T16 gap (see GATE_Y). Laid by hand: the 40 mm grid has no cell on
+// the gap's centre line, and A* keeps R_ROBOT, which the 200 mm gap does not leave.
+bool Planner::gate(math::Vec2 start, Path& out) {
+    gated_ = false;
+    if (extras_[0].y > GATE_MAX_BLOCK_Y || start.x < GATE_X0 || start.x > GATE_X1 || start.y < GATE_Y + GATE_MIN_RUN ||
+        start.y > GATE_MAX_START_Y)
+        return false;
+    math::Vec2* c = scratch_.f.tmpA;
+    int n = 0;
+    c[n++] = start;
+    if (GATE_TURN_ON_SPOT) {
+        c[n++] = {start.x, GATE_Y};  // straight down: the car stops here and turns on the spot (Navigator)
+    } else {
+        const float r = fminf(start.y - GATE_Y, GATE_ENTRY_R);
+        for (int k = 0; k <= 6; k++) {  // curve from heading down to heading +x, ending on the centre line
+            const float a = 3.14159265f + k * 0.26179939f;
+            c[n++] = {start.x + r + r * cosf(a), GATE_Y + r + r * sinf(a)};
+        }
+    }
+    for (int k = 0; k <= 6; k++) {  // through the gap and round into the lane
+        const float a = 1.57079633f - k * 0.26179939f;
+        c[n++] = {GATE_EXIT_X - GATE_EXIT_R + GATE_EXIT_R * cosf(a), GATE_Y - GATE_EXIT_R + GATE_EXIT_R * sinf(a)};
+    }
+    c[n++] = {GATE_EXIT_X, 120.0f};
+    c[n++] = {LANE_X, 0.0f};
+    c[n++] = {LANE_X, GOAL.y};
+    for (int k = 0; k < n - 1; k++)
+        if (!segmentFree(c[k], c[k + 1], GATE_CLEAR)) return false;
+    memcpy(scratch_.f.coarse, c, n * sizeof(math::Vec2));
+    gated_ = true;
+    finish(out, n);
+    return true;
+}
+
 void Planner::straight(math::Vec2 start, Path& out) {
+    gated_ = false;
     scratch_.f.coarse[0] = start;
     scratch_.f.coarse[1] = GOAL;
     finish(out, 2);
@@ -307,6 +353,11 @@ void Planner::finish(Path& out, int n) {
     int np = 0;
     pr[np++] = scratch_.f.coarse[0];
     int i = 0;
+    if (gated_) {  // laid by hand: keep every corner
+        memcpy(pr, scratch_.f.coarse, n * sizeof(math::Vec2));
+        np = n;
+        i = n - 1;
+    }
     while (i < n - 1) {
         int j = n - 1;
         // coarse stride first, then refine to the farthest visible point
@@ -335,7 +386,7 @@ void Planner::finish(Path& out, int n) {
     // Chaikin corner cutting (twice), kept only while the result stays clear of the blocks
     math::Vec2* cur = pr;
     math::Vec2* alt = scratch_.f.tmpB;
-    for (int it = 0; it < 2; it++) {
+    for (int it = 0; it < 2 && !gated_; it++) {
         if (np < 2 || 2 * np > MAX_COARSE) break;
         int m = 0;
         alt[m++] = cur[0];
@@ -380,7 +431,7 @@ void Planner::finish(Path& out, int n) {
         m++;
     }
     out.n = m;
-    bool laneFree = true;  // a detected block in or beside the lane: leave the route as planned around it
+    bool laneFree = !gated_;  // a detected block in or beside the lane: leave the route as planned around it
     for (int e = 0; e < nExtras_; e++) laneFree &= extras_[e].x < LANE_X - LANE_HALF - DISC_R;
     for (int k = 0; laneFree && k < m; k++) {
         math::Vec2& q = out.p[k];
@@ -411,7 +462,8 @@ void Planner::finish(Path& out, int n) {
     for (int k = 0; k < m; k += PROFILE_STRIDE) {
         float clr = clearanceUpTo(out.p[k], R_ROBOT + 60.0f);  // exact up to 150 mm, enough for vClr
         float edgeClr = edgeMargin(out.p[k]);
-        float vClr = std::clamp(0.4f + 0.6f * (clr - 95.0f) / 35.0f, 0.4f, 1.0f);
+        const float floor = nExtras_ > 0 && out.p[k].x > FOUND_X ? FOUND_GAP_FLOOR : out.p[k].x > RIGHT_WING_X ? RIGHT_GAP_FLOOR : 0.4f;
+        float vClr = std::clamp(floor + (1.0f - floor) * (clr - 95.0f) / 35.0f, floor, 1.0f);
         float vEdge = std::clamp(0.5f + 0.5f * (edgeClr - R_EDGE) / EDGE_SLOW_START, 0.5f, 1.0f);
         out.v[k] = fminf(vClr, vEdge);
     }
@@ -422,7 +474,7 @@ void Planner::finish(Path& out, int n) {
         int a = k + kw < m - 1 ? k + kw : m - 1;
         int b = k - kw > 0 ? k - kw : 0;
         float turn = fabsf(scratch_.f.hu[a] - scratch_.f.hu[b]);
-        float vTurn = std::clamp(1.0f / (1.0f + 1.75f * turn), 0.35f, 1.0f);
+        float vTurn = std::clamp(1.0f / (1.0f + (nExtras_ > 0 && out.p[k].x > FOUND_X ? FOUND_BEND : out.p[k].x > RIGHT_WING_X ? RIGHT_BEND : 1.75f) * turn), 0.35f, 1.0f);
         out.v[k] *= vTurn;
     }
 }

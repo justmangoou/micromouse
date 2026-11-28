@@ -6,8 +6,10 @@
 
 Flash layout (src/run_record.cpp): two slots of 6 KB. 0x0800D000 holds run 1 (no random block; the detection reference
 when it finished cleanly), 0x0800E800 holds run 2. A slot is: 8-byte header (magic, run number) + Trace at 0..511, then up
-to 352 16-byte fast-log records. Wheel speeds are stored in 8 mm/s units. Slots written by earlier firmware are not
-readable with this tool.
+to 352 16-byte fast-log records. Wheel speeds are stored in 8 mm/s units. Byte 8 of a record is the 90-degree right ToF
+range (5 mm units) in logs with magic 0xC0DE0006/7, the steering angle (10 mrad) in the older 0xC0DE0004/5 logs. Both
+are read; the CSV always has the 12 old columns, then tofS (right 90, mm; 1200 for old logs), and alpha_mrad is 0 for
+new logs.
 """
 import argparse, os, struct, subprocess, tempfile
 
@@ -16,10 +18,12 @@ SLOTS = (0x0800D000, 0x0800E800)
 SLOT_BYTES = 6 * 1024
 TRACE_BYTES = 512
 REC = 16
-MAGIC = 0xC0DE0004
-REF_MAGIC = 0xC0DE0005  # run 1 that serves as the reference
+MAGIC = 0xC0DE0006
+REF_MAGIC = 0xC0DE0007  # run 1 that serves as the reference
+OLD_MAGIC = 0xC0DE0004  # byte 8 = steering angle instead of the right-90 ToF
+OLD_REF_MAGIC = 0xC0DE0005
 SPEED_UNIT = 8  # mm/s
-COLS = "ms x y th_mrad alpha_mrad tgtL tgtR measL measR tofR tofF tofL".split()
+COLS = "ms x y th_mrad alpha_mrad tgtL tgtR measL measR tofR tofF tofL tofS".split()
 
 
 def dump(addr, size):
@@ -35,7 +39,8 @@ def dump(addr, size):
 
 def parse_slot(d):
     magic, seq = struct.unpack_from("<2I", d, 0)
-    valid = magic in (MAGIC, REF_MAGIC)
+    valid = magic in (MAGIC, REF_MAGIC, OLD_MAGIC, OLD_REF_MAGIC)
+    old = magic in (OLD_MAGIC, OLD_REF_MAGIC)
     t = {}
     if valid:
         o = 8
@@ -43,7 +48,7 @@ def parse_slot(d):
         t["state"], t["fault"], t["lastFault"], t["resetFlags"], t["extras"] = struct.unpack_from("<5B", d, o + 20)
         t["extraX"] = struct.unpack_from("<8h", d, o + 26)
         t["extraY"] = struct.unpack_from("<8h", d, o + 42)
-        t["reference"] = magic == REF_MAGIC
+        t["reference"] = magic in (REF_MAGIC, OLD_REF_MAGIC)
         t["x"] = struct.unpack_from("<48h", d, o + 58)
         t["y"] = struct.unpack_from("<48h", d, o + 154)
         t["th"] = struct.unpack_from("<48h", d, o + 250)
@@ -53,7 +58,11 @@ def parse_slot(d):
         if b[0:2] == b"\xff\xff":
             break
         ms, x, y, th, al, tl, tr, ml, mr, r, f, l = struct.unpack("<Hhhhb4b3B", b)
-        rows.append((ms, x, y, th, al * 10, tl * SPEED_UNIT, tr * SPEED_UNIT, ml * SPEED_UNIT, mr * SPEED_UNIT, r * 5, f * 5, l * 5))
+        if old:
+            alpha, side = al * 10, 1200
+        else:
+            alpha, side = 0, b[8] * 5
+        rows.append((ms, x, y, th, alpha, tl * SPEED_UNIT, tr * SPEED_UNIT, ml * SPEED_UNIT, mr * SPEED_UNIT, r * 5, f * 5, l * 5, side))
     return valid, seq, t, rows
 
 

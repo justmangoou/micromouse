@@ -2,7 +2,7 @@
  * @file    test_tof_single.cpp
  * @brief   Stationary bring-up of ONE VL53L0X (env:test_tof_single), through ST's API in single-shot mode. Sensor
  *          TOF_TEST_INDEX is woken through its XSHUT line (the others stay in reset), so only that sensor needs to
- *          be wired. Prints range in mm about 5 times a second as plain text for `pio device monitor`; the same
+ *          be wired (index 3 is the right-90 sensor, e.g. -DTOF_TEST_INDEX=3). Prints range in mm about 5 times a second as plain text for `pio device monitor`; the same
  *          numbers are in gTofSingle for ST-Link. The status LED blinks on every good range; fast blink = init failed.
  */
 #include <stdio.h>

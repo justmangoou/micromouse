@@ -27,9 +27,9 @@
 struct TofCalStatus {
     uint32_t sensor;      // the sensor being calibrated
     uint32_t doneMask;    // bit i set when sensor i finished
-    int32_t offsetUm[TOF_COUNT];
-    int32_t mean[TOF_COUNT], lo[TOF_COUNT], hi[TOF_COUNT], valid[TOF_COUNT];  // mm, the 50 checking readings
-    int32_t error[TOF_COUNT];  // 0 ok, 1 bring-up failed, else the API error
+    int32_t offsetUm[TOF_SENSORS];
+    int32_t mean[TOF_SENSORS], lo[TOF_SENSORS], hi[TOF_SENSORS], valid[TOF_SENSORS];  // mm, the 50 checking readings
+    int32_t error[TOF_SENSORS];  // 0 ok, 1 bring-up failed, else the API error
 };
 volatile TofCalStatus gTofCal = {};
 
@@ -37,8 +37,8 @@ namespace {
 
 I2cBus gI2c(&hi2c1);
 VL53L0X_Dev_t gDev;
-int32_t gOffsetUm[TOF_COUNT];
-bool gDone[TOF_COUNT];
+int32_t gOffsetUm[TOF_SENSORS];
+bool gDone[TOF_SENSORS];
 
 GPIO_TypeDef* const XSHUT_PORT[] = TOF_XSHUT_PORTS;
 const uint16_t XSHUT_PIN[] = TOF_XSHUT_PINS;
@@ -50,7 +50,7 @@ void waitKey() {
 }
 
 bool bringUp(int index) {
-    for (size_t i = 0; i < TOF_COUNT; ++i) HAL_GPIO_WritePin(XSHUT_PORT[i], XSHUT_PIN[i], GPIO_PIN_RESET);
+    for (size_t i = 0; i < TOF_SENSORS; ++i) HAL_GPIO_WritePin(XSHUT_PORT[i], XSHUT_PIN[i], GPIO_PIN_RESET);
     HAL_Delay(10);
     HAL_GPIO_WritePin(XSHUT_PORT[index], XSHUT_PIN[index], GPIO_PIN_SET);
     HAL_Delay(10);
@@ -98,7 +98,7 @@ int main() {
     HAL_Delay(200);
     VL53L0X_SetBus(&gI2c);
     printf("\nToF offset calibration, target at %d mm. KEY = go.\n", CAL_MM);
-    for (int i = 0; i < TOF_COUNT; ++i) {
+    for (int i = 0; i < TOF_SENSORS; ++i) {
         if (CAL_ONLY >= 0 && i != CAL_ONLY) continue;
         printf("Sensor %d: hold the flat target %d mm square in front of it, press KEY\n", i, CAL_MM);
         for (int k = 0; k < 3; ++k) ledStatusSet(false), HAL_Delay(300), ledStatusSet(true), HAL_Delay(300);  // ready blinks
@@ -118,12 +118,12 @@ int main() {
         gTofCal.doneMask |= 1u << i;
         ledStatusSet(false);
     }
-    printf("\nPaste into include/config.h:\nconstexpr int32_t TOF_OFFSET_UM[TOF_COUNT] = {");
-    for (int i = 0; i < TOF_COUNT; ++i) {
+    printf("\nPaste into include/config.h:\nconstexpr int32_t TOF_OFFSET_UM[TOF_SENSORS] = {");
+    for (int i = 0; i < TOF_SENSORS; ++i) {
         if (gDone[i]) printf("%ld", (long)gOffsetUm[i]);
         else if (CAL_ONLY >= 0) printf("(unchanged)");
         else printf("TOF_OFFSET_UNSET");
-        printf(i + 1 < TOF_COUNT ? ", " : "};\n");
+        printf(i + 1 < TOF_SENSORS ? ", " : "};\n");
     }
     while (true) {
         ledStatusSet((HAL_GetTick() / 500) % 2 == 0);

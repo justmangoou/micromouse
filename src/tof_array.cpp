@@ -19,21 +19,21 @@
 
 namespace {
 
-VL53L0X_Dev_t gDev[TOF_COUNT];
-bool gOk[TOF_COUNT];
-float gLast[TOF_COUNT];
-bool gReliable[TOF_COUNT];
-uint32_t gRangeTime[TOF_COUNT];
+VL53L0X_Dev_t gDev[TOF_SENSORS];
+bool gOk[TOF_SENSORS];
+float gLast[TOF_SENSORS];
+bool gReliable[TOF_SENSORS];
+uint32_t gRangeTime[TOF_SENSORS];
 I2cBus* gBus = nullptr;
-uint32_t gFailStreak[TOF_COUNT] = {};
-uint32_t gFailures[TOF_COUNT] = {};
-reliability::RangeStatus gStatus[TOF_COUNT];
+uint32_t gFailStreak[TOF_SENSORS] = {};
+uint32_t gFailures[TOF_SENSORS] = {};
+reliability::RangeStatus gStatus[TOF_SENSORS];
 uint32_t gInitTime = 0;
 
 GPIO_TypeDef* const XSHUT_PORT[] = TOF_XSHUT_PORTS;
 const uint16_t XSHUT_PIN[] = TOF_XSHUT_PINS;
-static_assert(sizeof(XSHUT_PORT) / sizeof(XSHUT_PORT[0]) == TOF_COUNT && sizeof(XSHUT_PIN) / sizeof(XSHUT_PIN[0]) == TOF_COUNT,
-              "config.h needs one XSHUT port and pin per sensor in cfg::TOF_COUNT");
+static_assert(sizeof(XSHUT_PORT) / sizeof(XSHUT_PORT[0]) == TOF_SENSORS && sizeof(XSHUT_PIN) / sizeof(XSHUT_PIN[0]) == TOF_SENSORS,
+              "config.h needs one XSHUT port and pin per sensor in cfg::TOF_SENSORS");
 
 inline uint8_t newAddress(int i) { return (uint8_t)(0x60 + 2 * i); }  // 8-bit form; 7-bit addresses start at 0x30
 inline uint8_t addr7(int i) { return (uint8_t)(newAddress(i) >> 1); }
@@ -102,7 +102,7 @@ int tofInit(I2cBus& bus) {
     gBus = &bus;
     VL53L0X_SetBus(&bus);
     gInitTime = HAL_GetTick();
-    for (int i = 0; i < TOF_COUNT; i++) {
+    for (int i = 0; i < TOF_SENSORS; i++) {
         HAL_GPIO_WritePin(XSHUT_PORT[i], XSHUT_PIN[i], GPIO_PIN_RESET);
         gOk[i] = false;
         gLast[i] = cfg::TOF_MAX_MM;
@@ -113,12 +113,12 @@ int tofInit(I2cBus& bus) {
     }
     HAL_Delay(10);
     int up = 0;
-    for (int i = 0; i < TOF_COUNT; i++) {  // one at a time: they all wake up at the same address
+    for (int i = 0; i < TOF_SENSORS; i++) {  // one at a time: they all wake up at the same address
         HAL_GPIO_WritePin(XSHUT_PORT[i], XSHUT_PIN[i], GPIO_PIN_SET);
         HAL_Delay(10);
         gOk[i] = bringUp(i);
         if (gOk[i]) {
-            up++;
+            if (i < TOF_COUNT) up++;  // only the navigation sensors count
             gStatus[i] = reliability::RangeStatus::NotReady;
         } else {
             HAL_GPIO_WritePin(XSHUT_PORT[i], XSHUT_PIN[i], GPIO_PIN_RESET);
@@ -127,8 +127,8 @@ int tofInit(I2cBus& bus) {
     return up;
 }
 
-void tofRead(float mm[TOF_COUNT]) {
-    for (int i = 0; i < TOF_COUNT; i++) {
+void tofRead(float mm[TOF_SENSORS]) {
+    for (int i = 0; i < TOF_SENSORS; i++) {
         if (gOk[i]) {
             float v;
             switch (readSample(i, &v)) {
@@ -154,23 +154,28 @@ void tofRead(float mm[TOF_COUNT]) {
                     gStatus[i] = reliability::RangeStatus::BusError;
                     ++gFailures[i];
                     if (gFailStreak[i] < UINT32_MAX) ++gFailStreak[i];
+                    // An extra sensor that keeps failing is dropped (no more bus time spent on it) until tofInit runs again.
+                    if (i >= TOF_COUNT && gFailStreak[i] >= RECOVER_AFTER_FAILURES) gOk[i] = false;
                     break;
             }
         }
         float v = gLast[i];
+        // An extra sensor is optional: unless its range is good and fresh it reports "nothing in range".
+        if (i >= TOF_COUNT && !(gOk[i] && gReliable[i] && HAL_GetTick() - gRangeTime[i] <= reliability::MAX_AGE_MS))
+            v = cfg::TOF_MAX_MM;
         mm[i] = v < cfg::TOF_MIN_MM ? cfg::TOF_MIN_MM : (v > cfg::TOF_MAX_MM ? cfg::TOF_MAX_MM : v);
     }
 }
 
-bool tofOk(int index) { return index >= 0 && index < TOF_COUNT && gOk[index]; }
+bool tofOk(int index) { return index >= 0 && index < TOF_SENSORS && gOk[index]; }
 
 bool tofReliable(int index, uint32_t maxAgeMs) {
-    return index >= 0 && index < TOF_COUNT && gOk[index] && gReliable[index] &&
+    return index >= 0 && index < TOF_SENSORS && gOk[index] && gReliable[index] &&
            HAL_GetTick() - gRangeTime[index] <= maxAgeMs;
 }
 
 reliability::RangeReading tofReading(int index, uint32_t now) {
-    if (index < 0 || index >= TOF_COUNT) return {};
+    if (index < 0 || index >= TOF_SENSORS) return {};
     auto status = gStatus[index];
     if ((status == reliability::RangeStatus::Valid || status == reliability::RangeStatus::Invalid) &&
         !reliability::fresh(now, gRangeTime[index])) status = reliability::RangeStatus::Stale;

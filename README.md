@@ -5,7 +5,7 @@ A small two-wheeled robot drives from the start line to the finish line of a blo
 sensors and drives around it.
 
 **Hardware:** Blue Pill (STM32F103C8: 72 MHz, 20 KB RAM, 64 KB flash, no FPU), two DC motors with quadrature encoders,
-an MPU6050 gyro, three VL53L0X time-of-flight distance sensors (right 45°, front, left 45°), a start button (KEY) and a
+an MPU6050 gyro, four VL53L0X time-of-flight distance sensors (right 45°, front, left 45°, and an optional right 90°), a start button (KEY) and a
 status LED.
 
 ## A run
@@ -15,8 +15,8 @@ status LED.
 3. Carry it back to the start and press KEY again for the next run.
 
 Run 1 is without the random block (ready LED: slow even blink). Once it finishes cleanly, its log is the reference and
-the next runs look for the block (ready LED: double blink). The robot forgets it at power-off or reset, so the first
-run after switching on always learns again (or hold KEY for 2 s during the countdown).
+the next runs look for the block (ready LED: double blink). It is kept through power-off; to
+learn run 1 again, hold KEY for 2 s during the countdown.
 
 A fault stops the motors and the LED flashes its number (`src/course.cpp`, `statusLed`). The two runs are kept in
 flash and can be read afterwards (`tools/read_run.py`).
@@ -27,7 +27,7 @@ Two loops run at the same time:
 
 ```
 every 33 ms (main loop, src/course.cpp)                          every 5 ms (timer interrupt, src/motor.cpp)
-  read gyro, encoders, 3 ToF ranges          (main.cpp)            measure each wheel's speed from its encoder
+  read gyro, encoders, 4 ToF ranges          (main.cpp)            measure each wheel's speed from its encoder
   pose = odometry(encoders, gyro)            (lib/base/odometry)   duty = feed-forward(target) + PI(target - speed)
   Navigator.step(pose, ToF):                 (lib/course_nav)      PWM to the motor
     - a block not on the map?  -> plan a new route (A*)
@@ -59,7 +59,7 @@ src/
   run_record.cpp    run 1 (the reference) and run 2 in flash
   motor.cpp         motors and the 200 Hz wheel speed loop
   board.cpp         clocks, pins, timers, I2C (STM32 HAL)
-  tof_array.cpp     the three VL53L0X sensors
+  tof_array.cpp     the four VL53L0X sensors
   test_*.cpp        bench firmware, one per platformio environment (motor step test, ToF calibration, ...)
 lib/
   base/             maths, odometry, PID, speed controller, safety supervisor (no hardware: tested on the PC)

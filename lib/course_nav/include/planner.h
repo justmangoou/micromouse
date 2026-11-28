@@ -53,6 +53,21 @@ constexpr float DISC_R = 50.0f;     // an unmapped block is a disc around its es
                                     // (it was 110) closed the 22 cm gap below T14 and sent the car round over the top
 constexpr float CENTERING = 6.0f;
 
+// The gap between T15 (above) and T16 (below), 200 mm. With the random block low in the first corridor of the right
+// wing the route goes through it instead of back up and round T15: down to the gap, turn on the spot, straight through,
+// round into the finish lane (Planner::gate, Navigator: GATE_*).
+constexpr float GATE_Y = 300.0f;             // the gap's centre line
+constexpr float GATE_MAX_BLOCK_Y = 150.0f;   // only for a block centred this low (it leaves the gap's mouth free)
+constexpr float GATE_X0 = 1220.0f, GATE_X1 = 1330.0f;  // the car is in the corridor ...
+constexpr float GATE_MIN_RUN = 50.0f;        // ... at least this far above the gap
+constexpr float GATE_MAX_START_Y = 700.0f;
+constexpr float GATE_EXIT_X = 1600.0f, GATE_EXIT_R = 100.0f;  // the turn into the lane: round T16's corner (1500, 200)
+constexpr float GATE_CLEAR = 75.0f;           // every leg keeps this from the blocks (the gap leaves 100)
+constexpr float GATE_FACE_X1 = 1500.0f;      // T16's right-hand face (its top face spans x 1400-1500 at y 200)
+// true: stop above the gap and turn on the spot (Navigator measures there). false: curve into it without stopping.
+constexpr bool GATE_TURN_ON_SPOT = true;
+constexpr float GATE_ENTRY_R = 90.0f;        // the curve into the gap, at most
+
 constexpr math::Vec2 GOAL = {1320.0f, -120.0f};  // only the straight-line fallback; A* ends anywhere on the finish line
 
 struct Path {
@@ -71,6 +86,7 @@ public:
 
     void clearExtras() { nExtras_ = 0; }
     int numExtras() const { return nExtras_; }
+    bool gated() const { return gated_; }  // the last plan goes through the T15-T16 gap
     int addExtra(math::Vec2 centre);  // -1 if full
     math::Vec2 extra(int i) const { return extras_[i]; }
     void setExtra(int i, math::Vec2 c) { extras_[i] = c; }
@@ -94,11 +110,13 @@ private:
     int astar(math::Vec2 start, float radius);
     void buildWork();
     void finish(Path& out, int nCoarse);
+    bool gate(math::Vec2 start, Path& out);
 
     Block blocks_[MAX_MAP];
     int nBlocks_ = 0;
     math::Vec2 extras_[MAX_EXTRA];
     int nExtras_ = 0;
+    bool gated_ = false;
 
     uint8_t base_[GRID_CELLS];   // static clearance, 2.5 mm units (0 off the track)
     uint8_t work_[GRID_CELLS];   // base_ with the unmapped discs applied

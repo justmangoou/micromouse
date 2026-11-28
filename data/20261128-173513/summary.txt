@@ -1,0 +1,37 @@
+=== run1 (reference): #1, 153 log records
+  5200 ms, replans 1, unmapped 0, state 3 fault 0 lastFault 0
+   0 (  300,  -80) th  1.570
+   1 (  280,   60) th  1.847
+   2 (  148,  355) th  1.664
+   3 (  283,  567) th  0.786
+   4 (  501,  835) th  0.939
+   5 (  708,  887) th -0.378
+   6 (  954,  835) th -0.213
+   7 ( 1102,  742) th -0.635
+   8 ( 1230,  671) th -0.702
+   9 ( 1277,  564) th -1.423
+  10 ( 1285,  363) th -1.576
+  11 ( 1283,  144) th -1.586
+  12 ( 1281,  -66) th -1.575
+  13 ( 1281,  -98) th -1.573
+  wrote /Users/justmango/Documents/micromouse/tools/../data/20261128-173513/log_run1.csv
+=== run2: #11, 191 log records
+  6528 ms, replans 2, unmapped 1, state 3 fault 0 lastFault 0
+  unmapped blocks found at [(1282, 638)]
+   0 (  300,  -80) th  1.570
+   1 (  289,   90) th  1.809
+   2 (  152,  359) th  1.673
+   3 (  291,  574) th  0.799
+   4 (  504,  836) th  0.886
+   5 (  716,  886) th -0.356
+   6 (  952,  835) th -0.240
+   7 ( 1102,  741) th -0.618
+   8 ( 1105,  763) th  1.567
+   9 ( 1111,  911) th  1.231
+  10 ( 1218,  995) th  0.193
+  11 ( 1410,  947) th -0.764
+  12 ( 1542,  709) th -1.143
+  13 ( 1597,  463) th -1.668
+  14 ( 1588,  181) th -1.553
+  15 ( 1586, -109) th -1.581
+  wrote /Users/justmango/Documents/micromouse/tools/../data/20261128-173513/log_run2.csv
